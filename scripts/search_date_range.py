@@ -2,41 +2,14 @@
 import argparse
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
-AIRPORT_NAMES = {
-    "GMP": "김포",
-    "CJU": "제주",
-    "PUS": "부산",
-    "TAE": "대구",
-    "CJJ": "청주",
-    "KWJ": "광주",
-    "RSU": "여수",
-    "USN": "울산",
-    "HIN": "사천",
-    "KPO": "포항경주",
-    "YNY": "양양",
-    "MWX": "무안",
-    "SEL": "서울",
-}
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-
-def airport_label(code):
-    code = (code or "").upper()
-    return f"{AIRPORT_NAMES.get(code, code)}({code})" if code else ""
-
-
-def parse_date(value):
-    return datetime.strptime(value, "%Y-%m-%d")
-
-
-def ymd(value):
-    return value.strftime("%Y%m%d")
-
-
-def pretty(value):
-    return value.strftime("%Y-%m-%d")
+from common_cli import airport_label, cabin_label, compact_date, normalize_airport, parse_flexible_date, pretty_date
 
 
 def build_dates(start_date, end_date):
@@ -50,18 +23,25 @@ def build_dates(start_date, end_date):
 
 def main():
     parser = argparse.ArgumentParser(description="Search Korean domestic flights across date ranges")
-    parser.add_argument("--origin", required=True)
-    parser.add_argument("--destination", required=True)
-    parser.add_argument("--start-date", required=True)
-    parser.add_argument("--end-date", required=True)
+    parser.add_argument("--origin", required=True, help="예: GMP 또는 김포")
+    parser.add_argument("--destination", required=True, help="예: CJU 또는 제주")
+    parser.add_argument("--start-date", required=True, help="예: 2026-03-25, 내일")
+    parser.add_argument("--end-date", required=True, help="예: 2026-03-30")
     parser.add_argument("--return-offset", type=int, default=0)
     parser.add_argument("--adults", type=int, default=1)
     parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
     parser.add_argument("--human", action="store_true")
     args = parser.parse_args()
 
-    start_dt = parse_date(args.start_date)
-    end_dt = parse_date(args.end_date)
+    try:
+        origin = normalize_airport(args.origin)
+        destination = normalize_airport(args.destination)
+        start_dt = parse_flexible_date(args.start_date)
+        end_dt = parse_flexible_date(args.end_date)
+    except ValueError as exc:
+        print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
     if end_dt < start_dt:
         print(json.dumps({"status": "error", "message": "end-date must be after or equal to start-date"}, ensure_ascii=False, indent=2))
         sys.exit(1)
@@ -92,9 +72,9 @@ def main():
 
     searcher = ParallelSearcher()
     raw = searcher.search_date_range(
-        origin=args.origin.upper(),
-        destination=args.destination.upper(),
-        dates=[ymd(d) for d in dates],
+        origin=origin,
+        destination=destination,
+        dates=[compact_date(d) for d in dates],
         return_offset=args.return_offset,
         adults=args.adults,
         cabin_class=args.cabin,
@@ -103,11 +83,11 @@ def main():
 
     normalized = []
     for d in dates:
-        key = ymd(d)
+        key = compact_date(d)
         price, airline = raw.get(key, (0, "N/A"))
         normalized.append({
-            "departure_date": pretty(d),
-            "return_date": pretty(d + timedelta(days=args.return_offset)) if args.return_offset > 0 else None,
+            "departure_date": pretty_date(d),
+            "return_date": pretty_date(d + timedelta(days=args.return_offset)) if args.return_offset > 0 else None,
             "price": price,
             "airline": airline,
         })
@@ -118,11 +98,11 @@ def main():
 
     summary = {
         "headline": (
-            f"{airport_label(args.origin)} → {airport_label(args.destination)} 날짜범위 최저가 {cheapest['price']:,}원"
+            f"{airport_label(origin)} → {airport_label(destination)} 날짜범위 최저가 {cheapest['price']:,}원"
             if cheapest else
-            f"{airport_label(args.origin)} → {airport_label(args.destination)} 날짜범위 검색 결과가 없습니다."
+            f"{airport_label(origin)} → {airport_label(destination)} 날짜범위 검색 결과가 없습니다."
         ),
-        "range": f"{args.start_date} ~ {args.end_date}",
+        "range": f"{pretty_date(start_dt)} ~ {pretty_date(end_dt)}",
         "trip_type": "왕복 범위검색" if args.return_offset > 0 else "편도 범위검색",
         "best_date": cheapest,
         "top_dates": available[:5],
@@ -131,7 +111,7 @@ def main():
     if args.human:
         lines = [summary["headline"]]
         lines.append(f"범위: {summary['range']}")
-        lines.append(f"조건: 성인 {args.adults}명 · {args.cabin}")
+        lines.append(f"조건: 성인 {args.adults}명 · {cabin_label(args.cabin)}")
         if args.return_offset > 0:
             lines.append(f"왕복 기준: 출발일 + {args.return_offset}일 귀국")
         if cheapest:
@@ -152,10 +132,10 @@ def main():
     print(json.dumps({
         "status": "success",
         "query": {
-            "origin": args.origin.upper(),
-            "destination": args.destination.upper(),
-            "start_date": args.start_date,
-            "end_date": args.end_date,
+            "origin": origin,
+            "destination": destination,
+            "start_date": pretty_date(start_dt),
+            "end_date": pretty_date(end_dt),
             "return_offset": args.return_offset,
             "adults": args.adults,
             "cabin": args.cabin,

@@ -2,7 +2,7 @@
 
 대한민국 **국내선 항공권 검색 전용** OpenClaw 스킬입니다.
 
-Playwright 기반 로컬 항공권 검색 저장소([`Scraping-flight-information`](https://github.com/twbeatles/Scraping-flight-information))의 검색 로직을 얇게 감싸서, **김포-제주 / 부산-제주 / 청주-제주 / 광주-제주** 같은 대한민국 국내선 노선의 편도·왕복·날짜범위 최저가를 빠르게 조회할 수 있게 만든 스킬입니다.
+Playwright 기반 로컬 항공권 검색 저장소([`Scraping-flight-information`](https://github.com/twbeatles/Scraping-flight-information))의 검색 로직을 얇게 감싸서, **김포-제주 / 부산-제주 / 청주-제주 / 광주-제주** 같은 대한민국 국내선 노선의 편도·왕복·날짜범위 최저가와 다중 목적지 비교를 빠르게 조회할 수 있게 만든 스킬입니다.
 
 > 핵심 원칙: 이 스킬은 **대한민국 국내선 전용**입니다. 국제선 검색용으로 설계하지 않았습니다.
 
@@ -15,14 +15,16 @@ Playwright 기반 로컬 항공권 검색 저장소([`Scraping-flight-informatio
 - 대한민국 **국내선 편도 검색**
 - 대한민국 **국내선 왕복 검색**
 - 대한민국 **국내선 날짜 범위 최저가 탐색**
+- 대한민국 **국내선 다중 목적지 비교**
 - 최저가 및 상위 옵션 요약
 - JSON 출력
 - 사람이 읽기 좋은 요약 출력 (`--human`)
+- **한글 공항명 입력 지원** (`김포`, `제주`, `부산` 등)
+- **간단한 자연어 날짜 입력 지원** (`오늘`, `내일`, `모레`)
 
 현재 버전에서 **아직 미지원**:
 
 - 국제선 검색
-- 다중 목적지 비교
 - 가격 알림
 - 예약 자동화
 
@@ -53,15 +55,11 @@ korea-domestic-flights-skill/
 ├── references/
 │   └── domestic-airports.md
 └── scripts/
+    ├── common_cli.py
     ├── search_domestic.py
-    └── search_date_range.py
+    ├── search_date_range.py
+    └── search_multi_destination.py
 ```
-
-- `SKILL.md`: OpenClaw가 스킬로 인식할 때 읽는 메타/사용 지침
-- `scripts/search_domestic.py`: 국내선 편도/왕복 검색 래퍼
-- `scripts/search_date_range.py`: 날짜 범위 최저가 탐색 래퍼
-- `references/domestic-airports.md`: 국내선 주요 공항 코드 참고 자료
-- `README.md`: GitHub 저장소용 문서
 
 ---
 
@@ -69,76 +67,71 @@ korea-domestic-flights-skill/
 
 ### 1) 편도 검색
 
-```bash
-python scripts/search_domestic.py --origin GMP --destination CJU --departure 2026-03-25
-```
-
-예시 의미:
-- 출발지: 김포 (`GMP`)
-- 도착지: 제주 (`CJU`)
-- 출발일: 2026-03-25
-
-### 2) 왕복 검색
-
-```bash
-python scripts/search_domestic.py --origin GMP --destination CJU --departure 2026-03-25 --return-date 2026-03-28
-```
-
-### 3) 사람이 읽기 좋은 요약 출력
+코드 입력:
 
 ```bash
 python scripts/search_domestic.py --origin GMP --destination CJU --departure 2026-03-25 --human
 ```
 
-왕복:
+한글 입력:
 
 ```bash
-python scripts/search_domestic.py --origin GMP --destination CJU --departure 2026-03-25 --return-date 2026-03-28 --human
+python scripts/search_domestic.py --origin 김포 --destination 제주 --departure 내일 --human
 ```
 
-### 4) 날짜 범위 최저가 검색
+### 2) 왕복 검색
 
 ```bash
-python scripts/search_date_range.py --origin GMP --destination CJU --start-date 2026-03-25 --end-date 2026-03-30 --human
+python scripts/search_domestic.py --origin 김포 --destination 제주 --departure 2026-03-25 --return-date 2026-03-28 --human
 ```
 
-### 5) 날짜 범위 + 왕복 오프셋 검색
+### 3) 날짜 범위 최저가 검색
+
+```bash
+python scripts/search_date_range.py --origin 김포 --destination 제주 --start-date 내일 --end-date 2026-03-22 --human
+```
+
+### 4) 날짜 범위 + 왕복 오프셋 검색
 
 예: 출발일 기준 **2일 뒤 귀국**하는 왕복 최저가 날짜를 찾고 싶을 때
 
 ```bash
-python scripts/search_date_range.py --origin GMP --destination CJU --start-date 2026-03-25 --end-date 2026-03-30 --return-offset 2 --human
+python scripts/search_date_range.py --origin 김포 --destination 제주 --start-date 2026-03-25 --end-date 2026-03-30 --return-offset 2 --human
+```
+
+### 5) 다중 목적지 비교
+
+```bash
+python scripts/search_multi_destination.py --origin 김포 --destinations 제주,부산,여수 --departure 내일 --human
+```
+
+왕복 비교:
+
+```bash
+python scripts/search_multi_destination.py --origin 김포 --destinations 제주,부산 --departure 2026-03-25 --return-date 2026-03-28 --human
 ```
 
 ---
 
-## 옵션
+## 자연어 친화 입력
 
-### `search_domestic.py`
+### 공항명 입력 예시
 
-| 옵션 | 설명 |
-|---|---|
-| `--origin` | 출발 공항 코드 (`GMP`, `CJU`, `PUS`, `TAE`, `CJJ` 등) |
-| `--destination` | 도착 공항 코드 |
-| `--departure` | 출발일 (`YYYY-MM-DD`) |
-| `--return-date` | 귀국일 (`YYYY-MM-DD`, 왕복 시 사용) |
-| `--adults` | 성인 수, 기본값 `1` |
-| `--cabin` | `ECONOMY`, `BUSINESS`, `FIRST` |
-| `--max-results` | 최대 결과 수, 기본값 `20` |
-| `--human` | JSON 대신 사람이 읽기 좋은 요약 출력 |
+- `김포` → `GMP`
+- `제주`, `제주도` → `CJU`
+- `부산`, `김해` → `PUS`
+- `청주` → `CJJ`
+- `광주` → `KWJ`
+- `여수` → `RSU`
 
-### `search_date_range.py`
+### 날짜 입력 예시
 
-| 옵션 | 설명 |
-|---|---|
-| `--origin` | 출발 공항 코드 |
-| `--destination` | 도착 공항 코드 |
-| `--start-date` | 날짜 범위 시작일 (`YYYY-MM-DD`) |
-| `--end-date` | 날짜 범위 종료일 (`YYYY-MM-DD`) |
-| `--return-offset` | 귀국 오프셋 일수. `2`면 출발일+2일 귀국 왕복 기준 |
-| `--adults` | 성인 수, 기본값 `1` |
-| `--cabin` | `ECONOMY`, `BUSINESS`, `FIRST` |
-| `--human` | JSON 대신 사람이 읽기 좋은 요약 출력 |
+- `오늘`
+- `내일`
+- `모레`
+- `2026-03-25`
+- `20260325`
+- `2026/03/25`
 
 ---
 
@@ -147,54 +140,38 @@ python scripts/search_date_range.py --origin GMP --destination CJU --start-date 
 ### 편도 `--human`
 
 ```text
-김포(GMP) → 제주(CJU) 편도 최저가 33,500원
-조건: 성인 1명 · ECONOMY · 결과 3건
-일정: 2026-03-25
-최저가: 에어서울 · 33,500원 · 18:40→19:55
+김포(GMP) → 제주(CJU) 편도 최저가 104,500원
+조건: 성인 1명 · 이코노미 · 결과 3건
+일정: 2026-03-20
+최저가: 에어서울 · 104,500원 · 14:30→15:45
 상위 옵션:
-1. 에어서울 · 33,500원 · 18:40→19:55
-2. 아시아나 · 33,600원 · 18:35→19:50
-3. 아시아나 · 33,600원 · 20:20→21:35
-```
-
-### 왕복 `--human`
-
-```text
-김포(GMP) → 제주(CJU) 왕복 최저가 95,100원
-조건: 성인 1명 · ECONOMY · 결과 3건
-일정: 2026-03-25 ~ 2026-03-28
-최저가: 에어서울/아시아나 · 총 95,100원 · 가는편 18:40→19:55 · 오는편 06:05→07:20
-상위 옵션:
-1. 에어서울/아시아나 · 총 95,100원 · 가는편 18:40→19:55 · 오는편 06:05→07:20
-2. 에어서울/아시아나 · 총 95,100원 · 가는편 18:40→19:55 · 오는편 06:10→07:25
-3. 에어서울/아시아나 · 총 95,100원 · 가는편 18:40→19:55 · 오는편 06:15→07:30
+1. 에어서울 · 104,500원 · 14:30→15:45
+2. 아시아나 · 107,600원 · 14:45→16:00
+3. 티웨이 · 108,600원 · 13:45→15:00
 ```
 
 ### 날짜 범위 `--human`
 
 ```text
-김포(GMP) → 제주(CJU) 날짜범위 최저가 33,500원
-범위: 2026-03-25 ~ 2026-03-27
-조건: 성인 1명 · ECONOMY
-최저가 날짜: 2026-03-25 · 33,500원 · 에어서울
+김포(GMP) → 제주(CJU) 날짜범위 최저가 42,500원
+범위: 2026-03-20 ~ 2026-03-22
+조건: 성인 1명 · 이코노미
+최저가 날짜: 2026-03-22 · 42,500원 · 에어서울
 상위 날짜:
-1. 2026-03-25 · 33,500원 · 에어서울
-2. 2026-03-26 · 65,500원 · 제주항공
-3. 2026-03-27 · 104,500원 · 에어서울
+1. 2026-03-22 · 42,500원 · 에어서울
+2. 2026-03-21 · 47,600원 · 아시아나
+3. 2026-03-20 · 104,500원 · 에어서울
 ```
 
-### 날짜 범위 + 왕복 오프셋 `--human`
+### 다중 목적지 비교 `--human`
 
 ```text
-김포(GMP) → 제주(CJU) 날짜범위 최저가 60,100원
-범위: 2026-03-25 ~ 2026-03-27
-조건: 성인 1명 · ECONOMY
-왕복 기준: 출발일 + 2일 귀국
-최저가 날짜: 2026-03-25 ~ 2026-03-27 · 60,100원 · 에어서울
-상위 날짜:
-1. 2026-03-25 ~ 2026-03-27 · 60,100원 · 에어서울
-2. 2026-03-26 ~ 2026-03-28 · 127,100원 · 제주항공
-3. 2026-03-27 ~ 2026-03-29 · 193,000원 · 에어서울
+김포(GMP) 출발 다중 목적지 최저가 33,500원
+조건: 출발 김포(GMP) · 출발일 2026-03-25 · 성인 1명 · 이코노미
+최적 목적지: 제주(CJU) · 33,500원 · 에어서울 · 18:40→19:55
+목적지 비교:
+1. 제주(CJU) · 33,500원 · 에어서울 · 18:40→19:55
+2. 부산(PUS) · 50,500원 · 진에어 · 19:10→20:15
 ```
 
 ---
@@ -204,10 +181,10 @@ python scripts/search_date_range.py --origin GMP --destination CJU --start-date 
 이 스킬은 아래 같은 질의에 맞춰 설계했습니다.
 
 - `김포에서 제주 가는 내일 최저가 찾아줘`
-- `부산 제주 왕복 항공권 최저가 보여줘`
-- `청주 제주 편도 가격 비교해줘`
-- `김포 제주 3일 범위로 최저가 비교해줘`
+- `부산 제주 왕복 항공권 요약해줘`
+- `청주 제주 3일 범위로 최저가 비교해줘`
 - `김포 제주 왕복 2박 기준 날짜별 최저가 찾아줘`
+- `김포 출발로 제주, 부산, 여수 중 어디가 제일 싼지 비교해줘`
 
 반대로 아래는 현재 범위 밖입니다.
 
@@ -235,17 +212,6 @@ python scripts/search_date_range.py --origin GMP --destination CJU --start-date 
 - `scraping.parallel.ParallelSearcher`
 
 즉, GUI 중심 원본 프로젝트 전체를 옮긴 것이 아니라, **검색 로직만 OpenClaw 스킬 형태로 노출**한 구조입니다.
-
----
-
-## 다음 계획
-
-향후 추가 후보:
-
-- 다중 목적지 비교
-- 더 자연스러운 한국어 요약
-- 아침 브리핑/리마인더와 연결
-- ClawHub 배포 정식화
 
 ---
 

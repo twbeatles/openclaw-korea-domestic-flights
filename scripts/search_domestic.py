@@ -5,26 +5,11 @@ import sys
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 
-AIRPORT_NAMES = {
-    "GMP": "김포",
-    "CJU": "제주",
-    "PUS": "부산",
-    "TAE": "대구",
-    "CJJ": "청주",
-    "KWJ": "광주",
-    "RSU": "여수",
-    "USN": "울산",
-    "HIN": "사천",
-    "KPO": "포항경주",
-    "YNY": "양양",
-    "MWX": "무안",
-    "SEL": "서울",
-}
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-
-def airport_label(code):
-    code = (code or "").upper()
-    return f"{AIRPORT_NAMES.get(code, code)}({code})" if code else ""
+from common_cli import airport_label, cabin_label, normalize_airport, parse_flexible_date, pretty_date
 
 
 def normalize_result(item):
@@ -62,10 +47,7 @@ def option_text(item):
             f"· 가는편 {item.get('departure_time','')}→{item.get('arrival_time','')} "
             f"· 오는편 {item.get('return_departure_time','')}→{item.get('return_arrival_time','')}"
         )
-    return (
-        f"{item.get('airline','')} · {item.get('price', 0):,}원 "
-        f"· {item.get('departure_time','')}→{item.get('arrival_time','')}"
-    )
+    return f"{item.get('airline','')} · {item.get('price', 0):,}원 · {item.get('departure_time','')}→{item.get('arrival_time','')}"
 
 
 def build_summary(query, normalized):
@@ -93,13 +75,9 @@ def build_summary(query, normalized):
 
 def format_human(summary, query, count):
     lines = [summary["headline"]]
-    lines.append(
-        f"조건: 성인 {query['adults']}명 · {query['cabin']} · 결과 {count}건"
-    )
+    lines.append(f"조건: 성인 {query['adults']}명 · {cabin_label(query['cabin'])} · 결과 {count}건")
     if query.get("return_date"):
-        lines.append(
-            f"일정: {query['departure']} ~ {query['return_date']}"
-        )
+        lines.append(f"일정: {query['departure']} ~ {query['return_date']}")
     else:
         lines.append(f"일정: {query['departure']}")
 
@@ -116,10 +94,10 @@ def format_human(summary, query, count):
 
 def main():
     parser = argparse.ArgumentParser(description="Search Korean domestic flights")
-    parser.add_argument("--origin", required=True)
-    parser.add_argument("--destination", required=True)
-    parser.add_argument("--departure", required=True)
-    parser.add_argument("--return-date", dest="return_date")
+    parser.add_argument("--origin", required=True, help="예: GMP 또는 김포")
+    parser.add_argument("--destination", required=True, help="예: CJU 또는 제주")
+    parser.add_argument("--departure", required=True, help="예: 2026-03-25, 20260325, 내일")
+    parser.add_argument("--return-date", dest="return_date", help="예: 2026-03-28, 모레")
     parser.add_argument("--adults", type=int, default=1)
     parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
     parser.add_argument("--max-results", type=int, default=20)
@@ -130,11 +108,7 @@ def main():
     repo_path = workspace / "tmp" / "Scraping-flight-information"
 
     if not repo_path.exists():
-        print(json.dumps({
-            "status": "error",
-            "message": "Source repository clone not found.",
-            "expected": str(repo_path)
-        }, ensure_ascii=False, indent=2))
+        print(json.dumps({"status": "error", "message": "Source repository clone not found.", "expected": str(repo_path)}, ensure_ascii=False, indent=2))
         sys.exit(1)
 
     sys.path.insert(0, str(repo_path))
@@ -142,12 +116,16 @@ def main():
     try:
         from scraping.searcher import FlightSearcher
     except Exception as exc:
-        print(json.dumps({
-            "status": "error",
-            "message": "Failed to import flight searcher.",
-            "details": str(exc),
-            "repo": str(repo_path)
-        }, ensure_ascii=False, indent=2))
+        print(json.dumps({"status": "error", "message": "Failed to import flight searcher.", "details": str(exc), "repo": str(repo_path)}, ensure_ascii=False, indent=2))
+        sys.exit(1)
+
+    try:
+        origin = normalize_airport(args.origin)
+        destination = normalize_airport(args.destination)
+        departure = pretty_date(parse_flexible_date(args.departure))
+        return_date = pretty_date(parse_flexible_date(args.return_date)) if args.return_date else None
+    except ValueError as exc:
+        print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False, indent=2))
         sys.exit(1)
 
     logs = []
@@ -156,10 +134,10 @@ def main():
         logs.append(str(msg))
 
     query = {
-        "origin": args.origin.upper(),
-        "destination": args.destination.upper(),
-        "departure": args.departure,
-        "return_date": args.return_date,
+        "origin": origin,
+        "destination": destination,
+        "departure": departure,
+        "return_date": return_date,
         "adults": args.adults,
         "cabin": args.cabin,
         "max_results": args.max_results,
