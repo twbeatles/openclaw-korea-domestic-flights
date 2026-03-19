@@ -28,15 +28,6 @@ Playwright 기반 로컬 항공권 검색 저장소([`Scraping-flight-informatio
 
 ---
 
-## 전제 조건
-
-이 스킬은 아래 로컬 저장소를 재사용합니다.
-
-- 소스 저장소 clone 위치:
-  - `tmp/Scraping-flight-information`
-
-즉, 이 저장소는 **독립 실행형 완전체**가 아니라, 기존 항공권 검색 프로젝트의 핵심 로직을 재사용하는 **스킬 래퍼(wrapper)** 입니다.
-
 ### 필요 환경
 
 - Python 3.10+
@@ -260,4 +251,4 @@ python scripts/search_date_range.py --origin GMP --destination CJU --start-date 
 
 ## 라이선스 / 출처
 
-이 저장소는 태완의 기존 프로젝트 `Scraping-flight-information`을 기반으로 스킬화한 파생 작업입니다.
+이 저장소는 기존 프로젝트 `Scraping-flight-information`을 기반으로 스킬화한 파생 작업입니다.
