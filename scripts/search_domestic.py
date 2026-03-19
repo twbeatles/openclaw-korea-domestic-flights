@@ -9,7 +9,15 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import airport_label, cabin_label, normalize_airport, parse_flexible_date, pretty_date
+from common_cli import (
+    airport_label,
+    cabin_label,
+    format_price,
+    normalize_airport,
+    parse_flexible_date,
+    pretty_date,
+    recommendation_line,
+)
 
 
 def normalize_result(item):
@@ -42,12 +50,12 @@ def normalize_result(item):
 def option_text(item):
     if item.get("is_round_trip"):
         return (
-            f"{item.get('airline','')}/{item.get('return_airline') or item.get('airline','')} "
-            f"· 총 {item.get('price', 0):,}원 "
-            f"· 가는편 {item.get('departure_time','')}→{item.get('arrival_time','')} "
-            f"· 오는편 {item.get('return_departure_time','')}→{item.get('return_arrival_time','')}"
+            f"{item.get('airline','')}/{item.get('return_airline') or item.get('airline','')}"
+            f" · 총 {format_price(item.get('price', 0))}"
+            f" · 가는편 {item.get('departure_time','')}→{item.get('arrival_time','')}"
+            f" · 오는편 {item.get('return_departure_time','')}→{item.get('return_arrival_time','')}"
         )
-    return f"{item.get('airline','')} · {item.get('price', 0):,}원 · {item.get('departure_time','')}→{item.get('arrival_time','')}"
+    return f"{item.get('airline','')} · {format_price(item.get('price', 0))} · {item.get('departure_time','')}→{item.get('arrival_time','')}"
 
 
 def build_summary(query, normalized):
@@ -61,15 +69,18 @@ def build_summary(query, normalized):
             "trip_type": trip_type,
             "cheapest_text": None,
             "top_options": [],
+            "recommendation": None,
         }
 
     cheapest = normalized[0]
+    second_price = normalized[1].get("price", 0) if len(normalized) > 1 else None
     return {
-        "headline": f"{route} {trip_type} 최저가 {cheapest.get('price', 0):,}원",
+        "headline": f"{route} {trip_type} 최저가 {format_price(cheapest.get('price', 0))}",
         "route": route,
         "trip_type": trip_type,
         "cheapest_text": option_text(cheapest),
         "top_options": [option_text(item) for item in normalized[:3]],
+        "recommendation": recommendation_line(option_text(cheapest), cheapest.get("price", 0), second_price),
     }
 
 
@@ -83,6 +94,8 @@ def format_human(summary, query, count):
 
     if summary.get("cheapest_text"):
         lines.append(f"최저가: {summary['cheapest_text']}")
+    if summary.get("recommendation"):
+        lines.append(summary["recommendation"])
 
     if summary.get("top_options"):
         lines.append("상위 옵션:")

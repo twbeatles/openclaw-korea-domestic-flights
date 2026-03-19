@@ -8,7 +8,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import airport_label, cabin_label, normalize_airport, parse_flexible_date, pretty_date
+from common_cli import (
+    airport_label,
+    cabin_label,
+    bullet_rank_lines,
+    format_price,
+    normalize_airport,
+    parse_flexible_date,
+    pretty_date,
+    recommendation_line,
+    unique_codes,
+)
 
 
 def main():
@@ -38,7 +48,7 @@ def main():
 
     try:
         origin = normalize_airport(args.origin)
-        destinations = [normalize_airport(x.strip()) for x in args.destinations.split(",") if x.strip()]
+        destinations = unique_codes([normalize_airport(x.strip()) for x in args.destinations.split(",") if x.strip()])
         departure = pretty_date(parse_flexible_date(args.departure))
         return_date = pretty_date(parse_flexible_date(args.return_date)) if args.return_date else None
     except ValueError as exc:
@@ -77,15 +87,17 @@ def main():
 
     ranked = sorted(normalized, key=lambda x: x["cheapest_price"] if x["cheapest_price"] > 0 else 10**12)
     best = ranked[0] if ranked and ranked[0]["cheapest_price"] > 0 else None
+    second_price = ranked[1]["cheapest_price"] if len(ranked) > 1 and ranked[1]["cheapest_price"] > 0 else None
 
     summary = {
         "headline": (
-            f"{airport_label(origin)} 출발 다중 목적지 최저가 {best['cheapest_price']:,}원"
+            f"{airport_label(origin)} 출발 다중 목적지 최저가 {format_price(best['cheapest_price'])}"
             if best else
             f"{airport_label(origin)} 출발 다중 목적지 검색 결과가 없습니다."
         ),
         "best_option": best,
         "ranked_destinations": ranked,
+        "recommendation": recommendation_line(best["destination_label"], best["cheapest_price"], second_price) if best else None,
     }
 
     if args.human:
@@ -94,14 +106,12 @@ def main():
         if return_date:
             lines.append(f"왕복 일정: {departure} ~ {return_date}")
         if best:
-            lines.append(f"최적 목적지: {best['destination_label']} · {best['cheapest_price']:,}원 · {best['airline']} · {best['departure_time']}→{best['arrival_time']}")
+            lines.append(f"최적 목적지: {best['destination_label']} · {format_price(best['cheapest_price'])} · {best['airline']} · {best['departure_time']}→{best['arrival_time']}")
+        if summary.get("recommendation"):
+            lines.append(summary["recommendation"])
         if ranked:
             lines.append("목적지 비교:")
-            for idx, item in enumerate(ranked[:5], start=1):
-                if item['cheapest_price'] > 0:
-                    lines.append(f"{idx}. {item['destination_label']} · {item['cheapest_price']:,}원 · {item['airline']} · {item['departure_time']}→{item['arrival_time']}")
-                else:
-                    lines.append(f"{idx}. {item['destination_label']} · 결과 없음")
+            lines.extend(bullet_rank_lines(ranked, "destination_label", "cheapest_price", lambda item: f"{item['airline']} · {item['departure_time']}→{item['arrival_time']}", limit=5))
         print("\n".join(lines))
         return
 
