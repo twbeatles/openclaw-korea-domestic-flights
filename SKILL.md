@@ -1,6 +1,6 @@
 ---
 name: korea-domestic-flights
-description: Search 대한민국 domestic flights using a Playwright-backed local scraper, and manage domestic airfare price-watch rules. Use when the user asks for 한국 국내선 항공권 검색, 김포-제주/부산-제주 같은 국내 노선 최저가 확인, 편도/왕복 조회, 날짜별 최저가 비교, 여러 국내 목적지 비교, 국내선 운임 요약, 목적지+날짜 범위 최적 조합 탐색, route/date fare checks, or 국내선 가격 알림/가격 감시/목표가 이하 알림 저장·점검. Accept common Korean airport names like 김포, 제주, 부산, 청주 as inputs, and simple natural-language dates like 오늘/내일/모레/이번주말/내일부터 3일. Prefer this skill for Korean domestic airfare tasks; do not use it for international flights.
+description: Search, compare, and monitor 대한민국 domestic flights using a Playwright-backed airfare workflow. Use when the user wants 한국 국내선 항공권 최저가 조회, 김포-제주/부산-제주 같은 노선 비교, 편도/왕복 검색, 날짜 범위 최저가 탐색, 여러 국내 목적지 비교, 시간대 선호(늦은 출발/늦은 복귀) 반영, 국내선 운임 브리핑, 목적지+날짜 범위 최적 조합 탐색, or 목표가 이하 가격 감시/가격 알림 저장·점검. Accept common Korean airport names like 김포, 제주, 부산, 청주 and natural-language dates like 오늘/내일/모레/이번주말/내일부터 3일. Prefer this skill for Korean domestic airfare tasks; do not use it for international flights.
 ---
 
 # Korea Domestic Flights
