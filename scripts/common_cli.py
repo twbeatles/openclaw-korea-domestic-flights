@@ -243,6 +243,18 @@ def recommendation_line(subject: str, best_price: int, next_price: int | None = 
     return f"추천: 이번 조건에서는 {subject}이(가) 가장 무난한 최저가 선택입니다."
 
 
+def explain_recommendation(subject: str, best_price: int, next_price: int | None = None, reasons: Sequence[str] | None = None) -> str:
+    parts: list[str] = [f"추천 사유: {subject} 기준"]
+    if best_price > 0:
+        parts.append(f"최저가 {format_price(best_price)}")
+    gap_text = summarize_price_gap(best_price, next_price)
+    if gap_text:
+        parts.append(gap_text)
+    if reasons:
+        parts.extend([reason for reason in reasons if reason])
+    return " · ".join(parts) + "."
+
+
 def bullet_rank_lines(items: Sequence[dict], label_key: str, price_key: str, detail_builder=None, limit: int = 5) -> List[str]:
     lines: List[str] = []
     for idx, item in enumerate(items[:limit], start=1):
@@ -255,6 +267,43 @@ def bullet_rank_lines(items: Sequence[dict], label_key: str, price_key: str, det
         else:
             lines.append(f"{idx}. {label} · 결과 없음")
     return lines
+
+
+def build_price_calendar(rows: Sequence[dict], date_key: str = "departure_date", price_key: str = "price") -> list[dict]:
+    available_prices = [int(item.get(price_key, 0) or 0) for item in rows if int(item.get(price_key, 0) or 0) > 0]
+    if not rows:
+        return []
+
+    cheapest = min(available_prices) if available_prices else 0
+    median = sorted(available_prices)[len(available_prices) // 2] if available_prices else 0
+
+    calendar = []
+    for item in rows:
+        price = int(item.get(price_key, 0) or 0)
+        if price <= 0:
+            band = "unavailable"
+            badge = "⚪"
+            note = "결과 없음"
+        elif cheapest and price == cheapest:
+            band = "best"
+            badge = "🟢"
+            note = "최저가"
+        elif median and price <= median:
+            band = "good"
+            badge = "🟡"
+            note = "양호"
+        else:
+            band = "high"
+            badge = "🔴"
+            note = "상대적으로 높음"
+        calendar.append({
+            "date": item.get(date_key),
+            "price": price,
+            "band": band,
+            "badge": badge,
+            "label": f"{item.get(date_key)} {badge} {format_price(price) if price > 0 else '결과 없음'} · {note}",
+        })
+    return calendar
 
 
 def unique_codes(values: Iterable[str]) -> list[str]:
@@ -345,6 +394,9 @@ def parse_time_preference_text(text: str | None) -> TimePreference:
 
     for key, (start_hour, end_hour) in TIME_BUCKETS.items():
         if key in normalized:
+            prefer_only = f"{key} 선호" in normalized or f"{key}시간 선호" in normalized or f"{key} 시간 선호" in normalized
+            if prefer_only:
+                continue
             if "복귀" in normalized or "귀환" in normalized or "오는편" in normalized:
                 pref.return_min = pref.return_min if pref.return_min is not None else start_hour * 60
                 pref.return_max = pref.return_max if pref.return_max is not None else end_hour * 60 + 59
@@ -437,6 +489,91 @@ def filter_and_rank_by_time_preference(items: Sequence[dict], pref: TimePreferen
 def choose_preferred_option(items: Sequence[dict], pref: TimePreference) -> dict | None:
     _, ranked = filter_and_rank_by_time_preference(items, pref)
     return ranked[0] if ranked else None
+
+
+def choose_balanced_round_trip_option(items: Sequence[dict], pref: TimePreference | None = None) -> dict | None:
+    candidates = [item for item in items if (item.get("price", 0) or 0) > 0]
+    if not candidates:
+        return None
+
+    candidates = sorted(candidates, key=lambda x: x.get("price", 0))
+    cheapest_price = candidates[0].get("price", 0) or 0
+    price_cap = int(cheapest_price * 1.15) if cheapest_price else 0
+    pool = [item for item in candidates if (item.get("price", 0) or 0) <= price_cap][:5] or candidates[:3]
+
+    def score(item: dict) -> tuple:
+        price = int(item.get("price", 0) or 0)
+        depart = parse_time_to_minutes(item.get("departure_time")) or 0
+        ret = parse_time_to_minutes(item.get("return_departure_time")) or 0
+        time_score = _score_time_preference(item, pref or TimePreference()) if pref else (depart // 2 + ret)
+        return (
+            -time_score,
+            price,
+        )
+
+    return sorted(pool, key=score)[0] if pool else candidates[0]
+
+
+def round_trip_balance_recommendation(balanced: dict | None, cheapest: dict | None, pref: TimePreference | None = None) -> str | None:
+    if not balanced:
+        return None
+    label = balanced.get("airline") or "옵션"
+    depart = balanced.get("departure_time") or "시간미상"
+    ret = balanced.get("return_departure_time") or "시간미상"
+    if cheapest and cheapest.get("price", 0) and balanced.get("price", 0):
+        gap = int(balanced.get("price", 0)) - int(cheapest.get("price", 0))
+        gap_text = "최저가와 동일 가격" if gap == 0 else (f"최저가 대비 {gap:,}원 추가" if gap > 0 else f"최저가보다 {-gap:,}원 저렴")
+    else:
+        gap_text = "가격 비교 정보 없음"
+    reason = pref.describe() if pref and pref.describe() else "왕복 시간 균형"
+    return f"왕복 균형 추천: {reason} 기준으로는 {label} 가는편 {depart}, 오는편 {ret} 조합이 무난합니다 ({gap_text})."
+
+
+def build_best_option_reasons(best: dict | None, next_price: int | None = None, pref: TimePreference | None = None) -> list[str]:
+    if not best:
+        return []
+    reasons: list[str] = []
+    airline = best.get("airline")
+    depart = best.get("departure_time")
+    arrival = best.get("arrival_time")
+    if airline:
+        if depart and arrival:
+            reasons.append(f"항공사 {airline}, 가는편 {depart}→{arrival}")
+        else:
+            reasons.append(f"항공사 {airline}")
+    if best.get("return_departure_time") or best.get("return_arrival_time"):
+        ret_depart = best.get("return_departure_time") or "시간미상"
+        ret_arrive = best.get("return_arrival_time")
+        if ret_arrive:
+            reasons.append(f"오는편 {ret_depart}→{ret_arrive}")
+        else:
+            reasons.append(f"오는편 {ret_depart} 출발")
+    if pref and pref.describe():
+        reasons.append(f"시간 조건 '{pref.describe()}' 반영")
+    price = int(best.get("price", 0) or best.get("cheapest_price", 0) or 0)
+    if next_price and price and next_price > price:
+        reasons.append(f"차상위 대비 {next_price - price:,}원 저렴")
+    return reasons
+
+
+def build_balanced_option_reasons(balanced: dict | None, cheapest: dict | None = None, pref: TimePreference | None = None) -> list[str]:
+    if not balanced:
+        return []
+    reasons: list[str] = []
+    depart = balanced.get("departure_time") or "시간미상"
+    ret = balanced.get("return_departure_time") or "시간미상"
+    reasons.append(f"왕복 시간대 {depart} / {ret} 조합")
+    if pref and pref.describe():
+        reasons.append(f"시간 선호 '{pref.describe()}'에 더 잘 맞음")
+    price = int(balanced.get("price", 0) or 0)
+    cheapest_price = int((cheapest or {}).get("price", 0) or 0)
+    if price and cheapest_price:
+        gap = price - cheapest_price
+        if gap == 0:
+            reasons.append("최저가와 동일한 가격")
+        elif gap > 0:
+            reasons.append(f"최저가 대비 추가 비용 {gap:,}원 수준")
+    return reasons
 
 
 def time_preference_recommendation(preferred: dict | None, cheapest: dict | None, pref: TimePreference) -> str | None:

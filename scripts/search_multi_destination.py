@@ -11,8 +11,10 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from common_cli import (
     airport_label,
+    build_best_option_reasons,
     cabin_label,
     bullet_rank_lines,
+    explain_recommendation,
     filter_and_rank_by_time_preference,
     format_price,
     normalize_airport,
@@ -134,6 +136,18 @@ def main():
         "best_option": best,
         "ranked_destinations": ranked,
         "recommendation": recommendation_line(best["destination_label"], best["cheapest_price"], second_price) if best else None,
+        "recommendation_explained": explain_recommendation(
+            best["destination_label"],
+            int(best["cheapest_price"] or 0),
+            second_price,
+            build_best_option_reasons({
+                "airline": best.get("airline"),
+                "departure_time": best.get("departure_time"),
+                "arrival_time": best.get("arrival_time"),
+                "cheapest_price": best.get("cheapest_price"),
+                "price": best.get("cheapest_price"),
+            }, second_price, time_pref),
+        ) if best else None,
     }
 
     if args.human:
@@ -147,6 +161,8 @@ def main():
             lines.append(f"최적 목적지: {best['destination_label']} · {format_price(best['cheapest_price'])} · {best['airline']} · {best['departure_time']}→{best['arrival_time']}")
         if summary.get("recommendation"):
             lines.append(summary["recommendation"])
+        if summary.get("recommendation_explained"):
+            lines.append(summary["recommendation_explained"])
         late_pref = next((item["time_recommendation"] for item in ranked if item.get("time_recommendation")), None)
         if late_pref:
             lines.append(late_pref)

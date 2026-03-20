@@ -11,8 +11,10 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from common_cli import (
     airport_label,
+    build_best_option_reasons,
     cabin_label,
     choose_preferred_option,
+    explain_recommendation,
     filter_and_rank_by_time_preference,
     format_price,
     normalize_airport,
@@ -87,6 +89,12 @@ def build_summary(query, normalized, preferred, time_pref):
         "cheapest_text": option_text(cheapest),
         "top_options": [option_text(item) for item in normalized[:3]],
         "recommendation": recommendation_line(option_text(cheapest), cheapest.get("price", 0), second_price),
+        "recommendation_explained": explain_recommendation(
+            option_text(cheapest),
+            int(cheapest.get("price", 0) or 0),
+            second_price,
+            build_best_option_reasons(cheapest, second_price, time_pref),
+        ),
         "time_preference_recommendation": time_preference_recommendation(preferred, cheapest, time_pref),
         "preferred_option": preferred,
     }
@@ -106,6 +114,8 @@ def format_human(summary, query, count, time_pref):
         lines.append(f"최저가: {summary['cheapest_text']}")
     if summary.get("recommendation"):
         lines.append(summary["recommendation"])
+    if summary.get("recommendation_explained"):
+        lines.append(summary["recommendation_explained"])
     if summary.get("time_preference_recommendation"):
         lines.append(summary["time_preference_recommendation"])
 

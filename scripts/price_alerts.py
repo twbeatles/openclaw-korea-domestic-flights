@@ -25,7 +25,7 @@ DEFAULT_MESSAGE_TEMPLATE = """[국내선 가격 알림] {label}
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import airport_label, cabin_label, format_price, normalize_airport, parse_date_range_text, parse_flexible_date, pretty_date, unique_codes
+from common_cli import airport_label, cabin_label, format_price, normalize_airport, parse_date_range_text, parse_flexible_date, parse_time_preference_text, pretty_date, unique_codes
 
 
 def now_iso() -> str:
@@ -92,6 +92,14 @@ def make_rule(args) -> dict[str, Any]:
     date_label = f"{date_range['start_date']}~{date_range['end_date']}" if date_range else departure
     label = args.label or f"{airport_label(origin)}→{destination_label} {date_label}"
 
+    time_preference = {
+        "time_pref": args.time_pref,
+        "depart_after": args.depart_after,
+        "return_after": args.return_after,
+        "exclude_early_before": args.exclude_early_before,
+        "prefer": args.prefer,
+    }
+
     fingerprint_payload = {
         "origin": origin,
         "destinations": destinations,
@@ -103,6 +111,7 @@ def make_rule(args) -> dict[str, Any]:
         "cabin": args.cabin,
         "trip_type": trip_type,
         "target_price_krw": args.target_price,
+        "time_preference": time_preference,
     }
 
     return {
@@ -121,6 +130,7 @@ def make_rule(args) -> dict[str, Any]:
             "adults": args.adults,
             "cabin": args.cabin,
             "trip_type": trip_type,
+            "time_preference": time_preference,
         },
         "target_price_krw": args.target_price,
         "created_at": now_iso(),
@@ -153,11 +163,22 @@ def describe_rule(rule: dict[str, Any]) -> str:
             date_text += f" ~ {q['return_date']}"
     state = "ON" if rule.get("enabled", True) else "OFF"
     template_flag = "사용자 템플릿" if rule.get("notify", {}).get("message_template") else "기본 템플릿"
+    time_pref = q.get("time_preference") or {}
+    time_pref_text = parse_time_preference_text(time_pref.get("time_pref")).describe() if time_pref.get("time_pref") else None
+    if time_pref.get("depart_after"):
+        time_pref_text = " · ".join(filter(None, [time_pref_text, f"출발 {time_pref['depart_after']} 이후"]))
+    if time_pref.get("return_after"):
+        time_pref_text = " · ".join(filter(None, [time_pref_text, f"복귀 {time_pref['return_after']} 이후"]))
+    if time_pref.get("exclude_early_before"):
+        time_pref_text = " · ".join(filter(None, [time_pref_text, f"{time_pref['exclude_early_before']} 이전 출발 제외"]))
+    if time_pref.get("prefer"):
+        time_pref_text = " · ".join(filter(None, [time_pref_text, f"선호 {time_pref['prefer']}"]))
+    time_pref_line = f"\n- 시간 조건: {time_pref_text}" if time_pref_text else ""
     return (
         f"[{state}] {rule['id']} | {rule['label']}\n"
         f"- 노선: {airport_label(q['origin'])} → {destination_text}\n"
         f"- 일정: {date_text}\n"
-        f"- 조건: 성인 {q['adults']}명 · {cabin_label(q['cabin'])} · 목표가 {format_price(rule['target_price_krw'])}\n"
+        f"- 조건: 성인 {q['adults']}명 · {cabin_label(q['cabin'])} · 목표가 {format_price(rule['target_price_krw'])}{time_pref_line}\n"
         f"- 알림: {template_flag} · 마지막 dedupe_key={rule.get('notify', {}).get('dedupe_key') or '없음'}"
     )
 
@@ -181,6 +202,17 @@ def check_rule(rule: dict[str, Any]) -> dict[str, Any]:
         "--adults", str(q["adults"]),
         "--cabin", q["cabin"],
     ]
+    tp = q.get("time_preference") or {}
+    if tp.get("time_pref"):
+        common.extend(["--time-pref", tp["time_pref"]])
+    if tp.get("depart_after"):
+        common.extend(["--depart-after", str(tp["depart_after"])])
+    if tp.get("return_after"):
+        common.extend(["--return-after", str(tp["return_after"])])
+    if tp.get("exclude_early_before"):
+        common.extend(["--exclude-early-before", str(tp["exclude_early_before"])])
+    if tp.get("prefer"):
+        common.extend(["--prefer", tp["prefer"]])
 
     if len(destinations) > 1 and q.get("date_range"):
         payload = run_search(
@@ -487,6 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--adults", type=int, default=1)
     add.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
     add.add_argument("--target-price", type=int, required=True, help="목표가(원)")
+    add.add_argument("--time-pref", help="자연어 시간 조건. 예: 저녁, 출발 10시 이후, 복귀 18시 이후, 늦은 시간 선호")
+    add.add_argument("--depart-after", help="출발 N시 이후. 예: 10, 10:30")
+    add.add_argument("--return-after", help="복귀 N시 이후. 예: 18, 18:30")
+    add.add_argument("--exclude-early-before", help="이 시간 이전 출발 제외. 예: 8, 08:30")
+    add.add_argument("--prefer", choices=["late", "morning", "afternoon", "evening"], help="시간대 선호 추천")
     add.add_argument("--notes", help="메모")
     add.add_argument("--message-template", help="알림 메시지 포맷. 예: '[특가] {label} {observed_price} / {date_text}'")
 

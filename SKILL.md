@@ -11,8 +11,10 @@ Current scope:
 - 국내선 편도 검색
 - 국내선 왕복 검색
 - 날짜 범위 최저가 탐색
+- 날짜별 가격 캘린더/히트맵 요약
 - 다중 목적지 비교
 - 다중 목적지 + 날짜 범위 최적 조합 탐색
+- 다중 목적지 + 날짜 범위 비교에서도 목적지별 가격 캘린더 요약 제공
 - JSON 출력
 - 더 자연스러운 한국어 브리핑 출력
 - 한글 공항명 입력 지원
@@ -21,7 +23,10 @@ Current scope:
 - 시간대 필터(오전/오후/저녁, 출발 N시 이후, 복귀 N시 이후, 너무 이른 비행 제외)
 - 최저가 외 시간 선호 기반 추천(예: 늦은 시간대 기준 추천)
 - 왕복/날짜범위 검색에서 귀환편 시간 조건 반영
+- 왕복 범위/조합 검색에서 가격만이 아닌 왕복 시간 균형 추천 제공
+- 추천 결과에 가격 차이·시간 조건·왕복 균형 기반 추천 사유 설명 제공
 - 목표가 기반 가격 감시 규칙 저장/목록/삭제/점검
+- 가격 감시 규칙에 시간대 조건 저장/점검 지원
 - 가격 알림 중복 방지(dedupe)
 - 단일/다중 목적지 가격 감시
 - 알림 메시지 포맷 커스터마이즈
@@ -142,6 +147,12 @@ Store a date-range alert:
 python skills/korea-domestic-flights/scripts/price_alerts.py add --origin 김포 --destination 제주 --date-range "내일부터 3일" --target-price 80000 --label "김포-제주 3일 범위 감시"
 ```
 
+Store a time-filtered alert:
+
+```bash
+python skills/korea-domestic-flights/scripts/price_alerts.py add --origin 김포 --destination 제주 --date-range "다음주말" --return-offset 2 --target-price 150000 --time-pref "복귀 18시 이후, 늦은 시간 선호" --label "주말 늦복 왕복 감시"
+```
+
 Store a multi-destination watch:
 
 ```bash
@@ -205,7 +216,9 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--adults`: 성인 수
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
 - `--time-pref`, `--depart-after`, `--return-after`, `--exclude-early-before`, `--prefer`: 시간 필터/시간 선호 추천
-- 시간 조건이 있으면 빠른 가격 API 대신 날짜별 상세 검색으로 자동 전환되어 왕복 귀환 시간 조건도 반영됨
+- 시간 조건이 있으면 전체 날짜를 병렬로 빠르게 훑은 뒤 상위 날짜만 상세 재검증하는 하이브리드 모드로 전환됨
+- `summary.search_metadata` / 최상위 `search_metadata` / `logs` 에 하이브리드 여부, 전체 스캔 수, 상세 재검증 수가 기록됨
+- 결과 요약에는 날짜별 가격 캘린더/히트맵(`summary.price_calendar`)이 포함됨
 - `--human`: 자연스러운 한국어 브리핑 출력
 
 `search_multi_destination.py`
@@ -227,7 +240,8 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--adults`: 성인 수
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
 - `--time-pref`, `--depart-after`, `--return-after`, `--exclude-early-before`, `--prefer`: 시간 필터/시간 선호 추천
-- 시간 조건이 있으면 조합별 상세 검색으로 자동 전환되어 귀환 시간 조건까지 반영됨
+- 시간 조건이 있으면 전체 조합을 목적지별 병렬 스캔으로 먼저 좁힌 뒤 상위 조합만 상세 재검증하는 하이브리드 모드로 전환됨
+- `summary.search_metadata` / 최상위 `search_metadata` / `logs` 에 하이브리드 여부, 전체 스캔 수, 상세 재검증 수가 기록됨
 - `--human`: 전체 최적 조합 + 목적지별 베스트 브리핑 출력
 
 `chat_search.py`
@@ -254,6 +268,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
   - `--cabin`: `ECONOMY|BUSINESS|FIRST`
   - `--target-price`: 목표가(원)
   - `--label`: 사람이 읽을 이름
+  - `--time-pref`, `--depart-after`, `--return-after`, `--exclude-early-before`, `--prefer`: 시간대 조건/선호 저장
   - `--message-template`: 커스텀 알림 포맷
   - `--store`: 저장 파일 경로 오버라이드
   - 동일 조건+목표가 규칙은 fingerprint 기준으로 중복 저장되지 않음
