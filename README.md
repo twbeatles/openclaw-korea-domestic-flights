@@ -1,6 +1,6 @@
-# korea-domestic-flights
+# OpenClaw Skill: Korea Domestic Flights
 
-대한민국 **국내선 항공권 검색·비교·날짜 범위 탐색·가격 감시**를 위한 OpenClaw 스킬입니다.
+`openclaw-korea-domestic-flights`는 대한민국 **국내선 항공권 검색·비교·날짜 범위 탐색·가격 감시**를 위한 **OpenClaw AgentSkill 저장소**입니다.
 
 이 스킬은 Playwright 기반 항공권 검색 흐름을 감싸서 다음 같은 작업을 처리합니다.
 
