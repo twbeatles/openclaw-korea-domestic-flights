@@ -8,15 +8,16 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import close_safely, emit_json, normalize_airport, parse_flexible_date, resolve_source_repo, source_repo_candidates
+from common_cli import close_safely, emit_json, normalize_airport, parse_flexible_date, resolve_route_scope, resolve_source_repo, source_repo_candidates
 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Shallow live dry-run / DOM drift sanity check for korea-domestic-flights")
+    parser = argparse.ArgumentParser(description="Shallow live dry-run / DOM drift sanity check for flight skill")
     parser.add_argument("--origin", default="김포")
     parser.add_argument("--destination", default="제주")
     parser.add_argument("--departure", default="내일", help="1-day live probe 에 사용할 날짜")
+    parser.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"], help="노선 유형 강제")
     parser.add_argument("--probe", action="store_true", help="실제로 1일 broad scan 을 시도합니다. 없으면 환경/임포트만 확인합니다.")
     parser.add_argument("--repo-path", help="upstream Scraping-flight-information 저장소 경로")
     args = parser.parse_args()
@@ -60,6 +61,7 @@ def main():
     try:
         origin = normalize_airport(args.origin)
         destination = normalize_airport(args.destination)
+        route_scope = resolve_route_scope(origin, [destination], args.scope)
         departure = parse_flexible_date(args.departure).strftime("%Y%m%d")
     except Exception as exc:
         report["status"] = "degraded"
@@ -82,6 +84,7 @@ def main():
         report["probe"] = {
             "ok": isinstance(raw, dict),
             "route": f"{origin}-{destination}",
+            "route_scope": route_scope,
             "departure": departure,
             "raw_type": type(raw).__name__,
             "keys": list(raw.keys())[:5],

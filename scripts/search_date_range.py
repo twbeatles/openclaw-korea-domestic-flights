@@ -14,6 +14,7 @@ if str(SCRIPT_DIR) not in sys.path:
 from common_cli import (
     add_section,
     airport_label,
+    benefit_text,
     build_balanced_option_reasons,
     build_best_option_reasons,
     build_price_calendar,
@@ -27,13 +28,16 @@ from common_cli import (
     format_time_or_fallback,
     join_nonempty,
     normalize_airport,
+    normalize_result_payload,
     parse_date_range_text,
     parse_flexible_date,
     parse_time_preference_args,
     pretty_date,
     recommendation_line,
+    resolve_route_scope,
     resolve_source_repo,
     round_trip_balance_recommendation,
+    route_scope_label,
     time_preference_recommendation,
     unverified_broad_rows,
     verified_priced_rows,
@@ -65,11 +69,22 @@ def _empty_row(dep, ret, price=0, airline=""):
         "return_date": ret,
         "price": price,
         "airline": airline,
+        "currency": "KRW",
         "departure_time": "",
         "arrival_time": "",
+        "duration": "",
+        "stops": 0,
+        "flight_number": "",
+        "source": "",
         "return_airline": "",
         "return_departure_time": "",
         "return_arrival_time": "",
+        "return_duration": "",
+        "return_stops": 0,
+        "benefit_price": 0,
+        "benefit_label": "",
+        "confidence": 0,
+        "extraction_source": "",
         "preferred_option": None,
         "time_recommendation": None,
         "search_stage": "broad_only",
@@ -271,6 +286,7 @@ def _refine_single_date(searcher, origin, destination, dep, ret, args, time_pref
     filtered, preferred_ranked = filter_and_rank_by_time_preference(raw_results, time_pref)
     cheapest = filtered[0] if filtered else None
     preferred = preferred_ranked[0] if preferred_ranked else None
+    cheapest_payload = normalize_result_payload(cheapest) if cheapest else normalize_result_payload({})
     diagnostic_reason, diagnostic_detail = _diagnose_refine_failure(
         raw_results,
         filtered,
@@ -280,13 +296,24 @@ def _refine_single_date(searcher, origin, destination, dep, ret, args, time_pref
     return {
         "departure_date": dep,
         "return_date": ret,
-        "price": cheapest.get("price", 0) if cheapest else 0,
-        "airline": cheapest.get("airline", "") if cheapest else "",
-        "departure_time": cheapest.get("departure_time", "") if cheapest else "",
-        "arrival_time": cheapest.get("arrival_time", "") if cheapest else "",
-        "return_airline": cheapest.get("return_airline", "") if cheapest else "",
-        "return_departure_time": cheapest.get("return_departure_time", "") if cheapest else "",
-        "return_arrival_time": cheapest.get("return_arrival_time", "") if cheapest else "",
+        "price": cheapest_payload.get("price", 0),
+        "airline": cheapest_payload.get("airline", ""),
+        "currency": cheapest_payload.get("currency", "KRW"),
+        "departure_time": cheapest_payload.get("departure_time", ""),
+        "arrival_time": cheapest_payload.get("arrival_time", ""),
+        "duration": cheapest_payload.get("duration", ""),
+        "stops": cheapest_payload.get("stops", 0),
+        "flight_number": cheapest_payload.get("flight_number", ""),
+        "source": cheapest_payload.get("source", ""),
+        "return_airline": cheapest_payload.get("return_airline", ""),
+        "return_departure_time": cheapest_payload.get("return_departure_time", ""),
+        "return_arrival_time": cheapest_payload.get("return_arrival_time", ""),
+        "return_duration": cheapest_payload.get("return_duration", ""),
+        "return_stops": cheapest_payload.get("return_stops", 0),
+        "benefit_price": cheapest_payload.get("benefit_price", 0),
+        "benefit_label": cheapest_payload.get("benefit_label", ""),
+        "confidence": cheapest_payload.get("confidence", 0),
+        "extraction_source": cheapest_payload.get("extraction_source", ""),
         "preferred_option": preferred,
         "time_recommendation": time_preference_recommendation(preferred, cheapest, time_pref),
         "search_stage": stage,
@@ -304,12 +331,13 @@ def _refine_single_date(searcher, origin, destination, dep, ret, args, time_pref
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Search Korean domestic flights across date ranges")
+    parser = argparse.ArgumentParser(description="Search flights across date ranges")
     parser.add_argument("--origin", required=True, help="예: GMP 또는 김포")
     parser.add_argument("--destination", required=True, help="예: CJU 또는 제주")
     parser.add_argument("--start-date", help="예: 2026-03-25, 내일")
     parser.add_argument("--end-date", help="예: 2026-03-30")
     parser.add_argument("--date-range", help="예: 내일부터 3일, 이번주말, 2026-03-25~2026-03-30")
+    parser.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"], help="노선 유형 강제")
     parser.add_argument("--return-offset", type=int, default=0)
     parser.add_argument("--adults", type=int, default=1)
     parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
@@ -325,6 +353,7 @@ def main():
     try:
         origin = normalize_airport(args.origin)
         destination = normalize_airport(args.destination)
+        route_scope = resolve_route_scope(origin, [destination], args.scope)
         if args.date_range:
             start_dt, end_dt = parse_date_range_text(args.date_range)
         elif args.start_date and args.end_date:
@@ -527,24 +556,14 @@ def main():
         for d in dates:
             key = d.strftime("%Y%m%d")
             price, airline = raw.get(key, (0, "N/A"))
-            normalized.append({
-                "departure_date": pretty_date(d),
-                "return_date": pretty_date(d + timedelta(days=args.return_offset)) if args.return_offset > 0 else None,
-                "price": price,
-                "airline": airline,
-                "departure_time": "",
-                "arrival_time": "",
-                "return_airline": "",
-                "return_departure_time": "",
-                "return_arrival_time": "",
-                "preferred_option": None,
-                "time_recommendation": None,
-                "search_stage": "parallel",
-                "time_pref_match": None,
-                "raw_option_count": 0,
-                "time_pref_valid_count": 0,
-                "diagnostic_detail": {},
-            })
+            row = _empty_row(
+                pretty_date(d),
+                pretty_date(d + timedelta(days=args.return_offset)) if args.return_offset > 0 else None,
+                price=price,
+                airline=airline,
+            )
+            row["search_stage"] = "parallel"
+            normalized.append(row)
         search_metadata["broad_scan_available"] = len([item for item in normalized if item["price"] and item["price"] > 0])
 
     available = verified_priced_rows(normalized, time_pref_active=time_pref.active())
@@ -567,6 +586,7 @@ def main():
         ),
         "range": f"{pretty_date(start_dt)} ~ {pretty_date(end_dt)}",
         "trip_type": "왕복 범위검색" if args.return_offset > 0 else "편도 범위검색",
+        "route_scope": route_scope,
         "search_strategy": search_metadata["strategy"],
         "search_metadata": search_metadata,
         "best_date": cheapest,
@@ -610,13 +630,14 @@ def main():
             return join_nonempty([
                 date_text,
                 format_price(item['price']),
+                benefit_text(item),
                 item.get('airline') or None,
                 join_nonempty(time_bits),
             ])
 
         lines = [summary["headline"]]
         lines.append(f"범위: {summary['range']}")
-        lines.append(f"조건: 성인 {args.adults}명 · {cabin_label(args.cabin)}")
+        lines.append(f"조건: {route_scope_label(route_scope)} · 성인 {args.adults}명 · {cabin_label(args.cabin)}")
         if args.return_offset > 0:
             lines.append(f"왕복 기준: 출발일 + {args.return_offset}일 귀국")
         if time_pref.describe():
@@ -660,6 +681,7 @@ def main():
             "start_date": pretty_date(start_dt),
             "end_date": pretty_date(end_dt),
             "return_offset": args.return_offset,
+            "scope": args.scope,
             "adults": args.adults,
             "cabin": args.cabin,
             "time_preference": time_pref.describe(),

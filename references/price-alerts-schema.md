@@ -1,4 +1,4 @@
-# 가격 감시 JSON 포맷
+# 항공권 가격 감시 JSON 포맷
 
 이 스킬의 가격 감시 기능은 기본적으로 스킬 루트의 `price-alert-rules.json` 파일을 사용한다.
 
@@ -17,7 +17,7 @@ OpenClaw cron/브리핑과 연결하기 쉽게 다음 원칙으로 설계한다.
 
 ```json
 {
-  "version": 2,
+  "version": 3,
   "timezone": "Asia/Seoul",
   "updated_at": "2026-03-19T18:40:00+09:00",
   "rules": [
@@ -37,6 +37,7 @@ OpenClaw cron/브리핑과 연결하기 쉽게 다음 원칙으로 설계한다.
           "end_date": "2026-03-23"
         },
         "return_offset": 0,
+        "scope": "domestic",
         "adults": 1,
         "cabin": "ECONOMY",
         "trip_type": "one_way",
@@ -88,14 +89,15 @@ OpenClaw cron/브리핑과 연결하기 쉽게 다음 원칙으로 설계한다.
 - `rules[].query.departure`, `return_date`: 단일 날짜 감시용
 - `rules[].query.date_range`: 날짜 범위 감시용
 - `rules[].query.return_offset`: 날짜 범위 왕복 감시에서 귀국일 오프셋
+- `rules[].query.scope`: `auto|domestic|international`
 - `rules[].query.source_repo_path`: 필요할 때 upstream 저장소를 명시적으로 지정하는 절대 경로
 - `rules[].query.adults`, `cabin`: 검색 조건
 - `rules[].target_price_krw`: 목표가
-- `rules[].last_result`: 마지막 점검 결과 캐시
+- `rules[].last_result`: 마지막 점검 결과 캐시. 실제로는 호출된 검색 스크립트의 원본 JSON 이 저장되므로 `query.scope`, `summary.route_scope`, `results[]` 와 함께 `duration`, `stops`, `flight_number`, `benefit_price`, `benefit_label`, `source`, `extraction_source`, `confidence` 같은 결과 필드도 포함될 수 있다.
 - `rules[].notify.channel`: 현재는 `stdout` 고정, 향후 확장 대비
 - `rules[].notify.dedupe_key`: 최근 발송된 알림 fingerprint
 - `rules[].notify.last_sent_at`: 마지막 알림 발송 시각
-- `rules[].notify.message_template`: 사용자 정의 메시지 템플릿
+- `rules[].notify.message_template`: 사용자 정의 메시지 템플릿. 비어 있으면 기본 템플릿(`[항공권 가격 알림] ...`)이 사용된다.
 - `rules[].meta.notes`: 사용자 메모
 
 ## 다중 목적지 감시 동작
@@ -104,6 +106,12 @@ OpenClaw cron/브리핑과 연결하기 쉽게 다음 원칙으로 설계한다.
 - 단일 날짜 감시는 `search_multi_destination.py`
 - 날짜 범위 감시는 `search_destination_date_matrix.py`
 - 알림은 **가장 저렴한 목적지/날짜 조합 1건** 기준으로 발생한다.
+
+## 버전 2 마이그레이션
+
+- 기존 `version: 2` 규칙 파일은 로드 시 `version: 3` 으로 해석된다.
+- `query.scope` 가 없으면 저장된 origin/destination 조합으로 domestic/international 을 추론한다.
+- dedupe 키 계산 방식은 유지하므로, 기존 알림 억제 동작은 그대로 이어진다.
 
 ## 단일 날짜 + return-offset 동작
 

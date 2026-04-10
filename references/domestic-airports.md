@@ -1,5 +1,7 @@
 # 대한민국 국내선 주요 공항 코드
 
+이 목록은 자주 쓰는 국내선 매핑 예시다. raw 3자리 uppercase 코드는 별칭 테이블에 없어도 그대로 통과되고, `SEL` 은 서울 묶음 코드로 입력할 수 있다.
+
 - `GMP` — 김포
 - `CJU` — 제주
 - `PUS` — 부산(김해)
@@ -46,3 +48,8 @@
 - 청주 제주 3일 범위로 최저가 비교해줘
 - 김포 제주 왕복 2박 기준 날짜별 최저가 찾아줘
 - 김포 출발로 제주, 부산, 여수 중 어디가 제일 싼지 비교해줘
+
+## 코드 기반 예시
+
+- `python scripts/search_flights.py --origin GMP --destination CJU --departure 내일 --human`
+- `python scripts/search_flights.py --origin SEL --destination CJU --departure 내일 --human`

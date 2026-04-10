@@ -1,15 +1,17 @@
 ---
 name: korea-domestic-flights
-description: Search, compare, and monitor 대한민국 domestic flights using a Playwright-backed airfare workflow. Use when the user wants 한국 국내선 항공권 최저가 조회, 김포-제주/부산-제주 같은 노선 비교, 편도/왕복 검색, 날짜 범위 최저가 탐색, 여러 국내 목적지 비교, 시간대 선호(늦은 출발/늦은 복귀) 반영, 국내선 운임 브리핑, 목적지+날짜 범위 최적 조합 탐색, or 목표가 이하 가격 감시/가격 알림 저장·점검. Accept common Korean airport names like 김포, 제주, 부산, 청주 and natural-language dates like 오늘/내일/모레/이번주말/내일부터 3일. Prefer this skill for Korean domestic airfare tasks; do not use it for international flights.
+description: Search, compare, and monitor Korean domestic and international flights using a Playwright-backed airfare workflow. Use when the user wants 항공권 최저가 조회, 김포-제주/인천-나리타 같은 노선 비교, 편도/왕복 검색, 날짜 범위 최저가 탐색, 여러 목적지 비교, 시간대 선호(늦은 출발/늦은 복귀) 반영, 운임 브리핑, 목적지+날짜 범위 최적 조합 탐색, or 목표가 이하 가격 감시/가격 알림 저장·점검. Accept common Korean airport names like 김포, 제주, 인천, 나리타, 도쿄, 오사카 plus natural-language dates like 오늘/내일/모레/이번주말/내일부터 3일.
 ---
 
-# Korea Domestic Flights
+# Korea Flights
 
-Use this skill for **대한민국 국내선 전용 항공권 검색**.
+Use this skill for **국내선 + 국제선 항공권 검색**. 저장소 이름은 legacy compatibility 때문에 `korea-domestic-flights` 를 유지하고, 실제 GitHub 저장소는 `twbeatles/korea-domestic-flights-skill` 이다.
 
 Current scope:
 - 국내선 편도 검색
 - 국내선 왕복 검색
+- 국제선 편도 검색
+- 국제선 왕복 검색
 - 날짜 범위 최저가 탐색
 - 날짜별 가격 캘린더/히트맵 요약
 - 다중 목적지 비교
@@ -17,7 +19,9 @@ Current scope:
 - 다중 목적지 + 날짜 범위 비교에서도 목적지별 가격 캘린더 요약 제공
 - JSON 출력
 - 더 자연스러운 한국어 브리핑 출력
-- 한글 공항명 입력 지원
+- 한글 공항명/도시명 입력 지원
+- raw 3-letter IATA/도시 코드 pass-through 지원
+- `--scope auto|domestic|international` 지원
 - `오늘/내일/모레/이번주말/내일부터 3일` 같은 간단한 자연어 날짜 지원
 - `2026-03-25~2026-03-30`, `20260325~20260330`, `2026-03-25부터 2026-03-30` 같은 명시 날짜 범위 지원
 - 채팅 친화 래퍼 제공
@@ -33,8 +37,6 @@ Current scope:
 - 알림 메시지 포맷 커스터마이즈
 - cron/브리핑 연동을 염두에 둔 JSON 저장 포맷
 - Windows 작업 스케줄러 등록 초안 스크립트
-
-Do not use it for 국제선.
 
 ## Source dependency
 
@@ -56,28 +58,34 @@ If the clone or its dependencies are missing, searches will fail.
 
 ## Scripts
 
-### 1) Single-route domestic search
+### 1) Single-route search
 
 ```bash
-python scripts/search_domestic.py --origin 김포 --destination 제주 --departure 내일 --human
+python scripts/search_flights.py --origin 김포 --destination 제주 --departure 내일 --human
 ```
 
 시간 조건 포함:
 
 ```bash
-python scripts/search_domestic.py --origin 김포 --destination 제주 --departure 내일 --time-pref "출발 10시 이후" --prefer late --human
+python scripts/search_flights.py --origin 김포 --destination 제주 --departure 내일 --time-pref "출발 10시 이후" --prefer late --human
 ```
 
 Round trip:
 
 ```bash
-python scripts/search_domestic.py --origin GMP --destination CJU --departure 2026-03-25 --return-date 2026-03-28 --human
+python scripts/search_flights.py --origin ICN --destination NRT --departure 2026-03-25 --return-date 2026-03-28 --scope international --human
+```
+
+City-code route:
+
+```bash
+python scripts/search_flights.py --origin SEL --destination TYO --departure 내일 --human
 ```
 
 ### 2) Date-range cheapest-day search
 
 ```bash
-python scripts/search_date_range.py --origin 김포 --destination 제주 --date-range "내일부터 3일" --human
+python scripts/search_date_range.py --origin ICN --destination KIX --date-range "내일부터 3일" --scope international --human
 ```
 
 Explicit range:
@@ -89,7 +97,7 @@ python scripts/search_date_range.py --origin 김포 --destination 제주 --start
 Round-trip-style date scan with fixed return offset:
 
 ```bash
-python scripts/search_date_range.py --origin 김포 --destination 제주 --date-range "다음주말" --return-offset 2 --time-pref "복귀 18시 이후" --human
+python scripts/search_date_range.py --origin ICN --destination NRT --date-range "다음주말" --return-offset 2 --scope international --time-pref "복귀 18시 이후" --human
 ```
 
 ### 3) Multi-destination comparison
@@ -101,7 +109,7 @@ python scripts/search_multi_destination.py --origin 김포 --destinations 제주
 Round trip comparison:
 
 ```bash
-python scripts/search_multi_destination.py --origin GMP --destinations CJU,PUS,RSU --departure 2026-03-25 --return-date 2026-03-28 --human
+python scripts/search_multi_destination.py --origin ICN --destinations NRT,KIX,FUK --departure 2026-03-25 --return-date 2026-03-28 --scope international --human
 ```
 
 ### 4) Multi-destination + date-range best-combo search
@@ -113,7 +121,7 @@ python scripts/search_destination_date_matrix.py --origin 김포 --destinations 
 Round-trip offset scan across destinations:
 
 ```bash
-python scripts/search_destination_date_matrix.py --origin 김포 --destinations 제주,부산 --date-range "다음주말" --return-offset 2 --human
+python scripts/search_destination_date_matrix.py --origin ICN --destinations NRT,KIX --date-range "다음주말" --return-offset 2 --scope international --human
 ```
 
 ### 5) Chat-friendly wrapper
@@ -123,7 +131,7 @@ Use this first when the user is chatting naturally and you want the easiest invo
 Single route:
 
 ```bash
-python scripts/chat_search.py --origin 김포 --destination 제주 --when 내일
+python scripts/chat_search.py --origin ICN --destination NRT --when 내일 --scope international
 ```
 
 Date range:
@@ -171,7 +179,7 @@ python scripts/regression_smoke_check.py
 Store a single-date alert:
 
 ```bash
-python scripts/price_alerts.py add --origin 김포 --destination 제주 --departure 내일 --target-price 70000 --label "김포-제주 내일 특가"
+python scripts/price_alerts.py add --origin ICN --destination NRT --departure 내일 --scope international --target-price 250000 --label "인천-나리타 내일 특가"
 ```
 
 Store a date-range alert:
@@ -226,11 +234,12 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 
 ## Parameters
 
-`search_domestic.py`
-- `--origin`: 출발 공항 코드 또는 한글 공항명
-- `--destination`: 도착 공항 코드 또는 한글 공항명
+`search_flights.py` (legacy `search_domestic.py` compatible wrapper 유지)
+- `--origin`: 출발 공항 코드, 도시 코드, 한글 공항명/도시명
+- `--destination`: 도착 공항 코드, 도시 코드, 한글 공항명/도시명
 - `--departure`: 출발일 (`YYYY-MM-DD`, `YYYYMMDD`, `내일`, `모레`, `이번주말`, `다음주 금요일` 등)
 - `--return-date`: 귀국일 (선택)
+- `--scope`: `auto|domestic|international`
 - `--adults`: 성인 수, 기본값 `1`
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
 - `--max-results`: 최대 결과 수
@@ -245,6 +254,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--start-date`: 범위 시작일
 - `--end-date`: 범위 종료일
 - `--date-range`: 자연어 범위 (`내일부터 3일`, `이번주말`, `2026-03-25~2026-03-30`)
+- `--scope`: `auto|domestic|international`
 - `--return-offset`: 왕복 탐색용 귀국 오프셋 일수
 - `--adults`: 성인 수
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
@@ -262,6 +272,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--destinations`: 쉼표로 구분한 여러 목적지 (코드 또는 한글)
 - `--departure`: 출발일
 - `--return-date`: 귀국일 (선택)
+- `--scope`: `auto|domestic|international`
 - `--adults`: 성인 수
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
 - `--time-pref`, `--depart-after`, `--return-after`, `--exclude-early-before`, `--prefer`: 시간 필터/시간 선호 추천
@@ -272,6 +283,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--destinations`: 쉼표로 구분한 여러 목적지
 - `--start-date`, `--end-date`: 날짜 범위 지정
 - `--date-range`: 자연어 날짜 범위 지정
+- `--scope`: `auto|domestic|international`
 - `--return-offset`: 출발일 기준 귀국 오프셋 일수
 - `--adults`: 성인 수
 - `--cabin`: `ECONOMY|BUSINESS|FIRST`
@@ -290,6 +302,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `--when`: 자연어 날짜/날짜범위
 - `--departure`: 명시적 출발일
 - `--return-date`: 명시적 귀국일
+- `--scope`: `auto|domestic|international`
 - `--return-offset`: 날짜범위 왕복 오프셋. `chat_search.py`에서는 다중 목적지 + 명시적 `--departure` 와 함께 쓰면 단일일 매트릭스 왕복 탐색으로, 단일 목적지 + 동일 조합이면 1일 범위 검색으로 라우팅됨
 - `--time-pref`: 자연어 시간 선호/필터 입력
 - `--depart-after`, `--return-after`, `--exclude-early-before`, `--prefer`: 옵션 기반 시간 필터
@@ -302,6 +315,7 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
   - `--departure`: 단일 날짜 감시
   - `--return-date`: 왕복 귀국일
   - `--date-range`: 날짜 범위 감시
+  - `--scope`: `auto|domestic|international`
   - `--return-offset`: 날짜 범위 왕복 감시 시 귀국 오프셋
   - `--adults`: 성인 수
   - `--cabin`: `ECONOMY|BUSINESS|FIRST`
@@ -321,10 +335,15 @@ When a rule matches, `check` prints a human-readable Korean alert message to std
 - `render`: 마지막 `last_result` 를 현재 템플릿으로 미리보기
 - `remove`: 규칙 삭제
 
+JSON contract note:
+- 단일/범위/다중 목적지 스크립트의 JSON 출력에는 요청 scope(`query.scope`)와 실제 추론 노선 유형(`summary.route_scope`)이 함께 들어간다.
+- 결과 항목에는 가능하면 upstream 의 `duration`, `return_duration`, `stops`, `return_stops`, `flight_number`, `benefit_price`, `benefit_label`, `source`, `extraction_source`, `confidence` 를 그대로 보존한다.
+
 ## References
 
 Read these only when needed:
 - `references/domestic-airports.md`: 국내 공항 코드/이름 매핑
+- `references/international-airports.md`: 주요 국제 공항/도시 코드 예시와 `SEL-TYO`, `ICN-KIX` 같은 도시/공항 코드 조합
 - `references/price-alerts-schema.md`: 가격 감시 JSON 저장 포맷, dedupe, 다중 목적지 감시, 메시지 템플릿, cron/스케줄러 연결 힌트
 
 ## Operational notes
@@ -335,4 +354,4 @@ Read these only when needed:
 - Natural-language dates and stored timestamps are interpreted in `Asia/Seoul`.
 - `price_alerts.py check` runs child search scripts in UTF-8 mode for Windows console safety.
 - For stable chat use, prefer `chat_search.py` or `--human` summaries unless structured JSON is explicitly needed.
-- Prefer domestic routes only; if the user asks for ICN-NRT or any overseas route, do not use this skill.
+- Prefer `search_flights.py` for new single-route integrations; `search_domestic.py` is kept for backward compatibility.

@@ -1,6 +1,6 @@
-# OpenClaw Skill: Korea Domestic Flights
+# OpenClaw Skill: Korea Flights
 
-`openclaw-korea-domestic-flights`는 대한민국 **국내선 항공권 검색·비교·날짜 범위 탐색·가격 감시**를 위한 **OpenClaw AgentSkill 저장소**입니다.
+`openclaw-korea-domestic-flights`는 설치 호환성을 위해 기존 저장소 이름을 유지하지만, 현재는 **국내선 + 국제선 항공권 검색·비교·날짜 범위 탐색·가격 감시**를 지원하는 **OpenClaw AgentSkill 저장소**입니다.
 
 이 스킬은 Playwright 기반 항공권 검색 흐름을 감싸서 다음 같은 작업을 처리합니다.
 
@@ -8,15 +8,17 @@
 
 ## OpenClaw에서 설치하기
 
-이 저장소는 **OpenClaw AgentSkill 리포지토리**입니다. 설치/연결할 때는 저장소 이름만 봐도 용도를 알아볼 수 있게 `openclaw-korea-domestic-flights` 이름을 사용합니다.
+이 저장소는 **OpenClaw AgentSkill 리포지토리**입니다. 설치/연결 경로는 기존 이름 `openclaw-korea-domestic-flights` 를 유지합니다.
 
-일반적으로는 아래처럼 다룹니다.
+일반적으로는 아래처럼 구분해 이해하면 된다.
 
-- 저장소: `twbeatles/openclaw-korea-domestic-flights`
+- 실제 GitHub 저장소: `twbeatles/korea-domestic-flights-skill`
+- OpenClaw 설치/연결 시 유지되는 legacy 식별자: `openclaw-korea-domestic-flights`
 - 스킬 엔트리: `SKILL.md`
-- 사람이 바로 이해할 이름: **OpenClaw Skill: Korea Domestic Flights**
+- 사람이 바로 이해할 이름: **OpenClaw Skill: Korea Flights**
 
 - 김포-제주, 부산-제주 같은 **국내선 단일 노선 검색**
+- 인천-나리타, 인천-간사이 같은 **국제선 단일 노선 검색**
 - **왕복 검색** 및 시간대 조건 반영
 - **날짜 범위 최저가 탐색**
 - **다중 목적지 비교**
@@ -24,15 +26,15 @@
 - **가격 캘린더/히트맵 요약**
 - **목표가 기반 가격 감시 규칙 저장/점검**
 
-> 국제선에는 사용하지 않습니다.
-
 ---
 
 ## 핵심 기능
 
 ### 1. 단일 노선 검색
 - 편도/왕복 검색
-- 한글 공항명 입력 지원 (`김포`, `제주`, `부산` 등)
+- 한글 공항명/도시명 입력 지원 (`김포`, `제주`, `인천`, `나리타`, `도쿄`, `오사카` 등)
+- 3자리 공항/도시 코드 pass-through 지원 (`GMP`, `ICN`, `NRT`, `TYO`, `KIX`, `LAX` 등)
+- `--scope auto|domestic|international` 지원
 - 시간대 조건 반영 (`출발 10시 이후`, `복귀 18시 이후` 등)
 - 추천 사유 설명 출력
 
@@ -45,6 +47,7 @@
 
 ### 3. 다중 목적지 비교
 - 예: 김포 출발로 제주/부산/여수 중 어디가 가장 유리한지 비교
+- 예: 인천 출발로 나리타/간사이/후쿠오카 중 어디가 가장 유리한지 비교
 - 목적지별 최저가/추천/가격 차이 설명 제공
 
 ### 4. 목적지 + 날짜 범위 매트릭스 탐색
@@ -63,17 +66,27 @@
 
 ### 단일 검색
 ```bash
-python scripts/search_domestic.py --origin 김포 --destination 제주 --departure 내일 --human
+python scripts/search_flights.py --origin 김포 --destination 제주 --departure 내일 --human
+```
+
+### 국제선 단일 검색
+```bash
+python scripts/search_flights.py --origin ICN --destination NRT --departure 내일 --scope international --human
+```
+
+### 도시 코드 검색
+```bash
+python scripts/search_flights.py --origin SEL --destination TYO --departure 내일 --human
 ```
 
 ### 날짜 범위 검색
 ```bash
-python scripts/search_date_range.py --origin 김포 --destination 제주 --date-range "내일부터 3일" --human
+python scripts/search_date_range.py --origin ICN --destination KIX --date-range "내일부터 3일" --scope international --human
 ```
 
 ### 다중 목적지 + 날짜 범위 검색
 ```bash
-python scripts/search_destination_date_matrix.py --origin 김포 --destinations 제주,부산 --date-range "다음주말" --return-offset 2 --human
+python scripts/search_destination_date_matrix.py --origin ICN --destinations NRT,KIX,FUK --date-range "다음주말" --return-offset 2 --scope international --human
 ```
 
 ### 시간 조건 포함 가격 감시 규칙 저장
@@ -92,6 +105,10 @@ python scripts/price_alerts.py add --origin 김포 --destination 제주 --date-r
 - 왕복 균형 추천
 - 날짜별 가격 캘린더
 - 목적지별 가격 캘린더
+- 국내선일 때 upstream 혜택가(`benefit_price`, `benefit_label`) 보존
+- upstream 결과의 `duration`, `return_duration`, `stops`, `return_stops`, `flight_number`, `source`, `extraction_source`, `confidence` 보존
+- 모든 JSON 출력에 `query.scope`, `summary.route_scope` 포함
+- `query.scope` 는 사용자가 요청한 scope(`auto|domestic|international`)이고, `summary.route_scope` 는 실제 노선 조합으로 추론된 값이다.
 - 사람용 출력에서는 `최저가`, `시간대 추천`, `왕복 균형 추천` 같은 구획을 나눠 더 읽기 쉽게 표시
 - 사람용 출력에서는 너무 길어지지 않도록 캘린더를 일부만 미리 보여주고 나머지 일수는 축약 표시
 - 시간 조건 하이브리드 검색에서는 추천/상위 결과를 **상세 검증 + 시간 조건 통과 결과만** 기준으로 잡고, 빠른 스캔 후보는 참고용으로만 분리 표시
@@ -126,15 +143,23 @@ upstream 저장소 위치는 다음 순서로 찾습니다.
 
 ## 현재 확인된 동작 상태
 
-최근 점검 기준:
+2026-04-10 점검 기준:
 - 모든 주요 스크립트 `py_compile` 통과
 - `price_alerts.py add/list/remove` 동작 확인
+- `search_flights.py` 추가 및 legacy `search_domestic.py` 호환 유지
+- 국제선 alias / raw IATA pass-through / route scope 회귀 확인
 - `chat_search.py`를 통한 다중 목적지+날짜 범위 JSON 검색 동작 확인
+- `chat_search.py`에서 국제선 단일/다중 목적지 라우팅 및 `--scope` 전달 확인
 - `chat_search.py`에서 다중 목적지 + 명시적 출발일 + `--return-offset` 조합이 날짜 매트릭스로, 단일 목적지 + 동일 조합이 1일 범위 검색으로 올바르게 라우팅되도록 보정
 - 다중 목적지+날짜 범위 검색에서 목적지별 `price_calendar` 출력 확인
 - `references/hybrid-smoke-fixtures.json` 기반 회귀/스모크 진단 케이스 확인
-- `scripts/regression_smoke_check.py` 로 경로 탐색/KST/알림 dedupe/return-offset 보정 회귀 확인
+- `scripts/regression_smoke_check.py` 로 경로 탐색/KST/알림 dedupe/return-offset 보정/scope 마이그레이션 회귀 확인
 - `hybrid_live_dry_run.py`로 환경 전용 또는 얕은 live probe 점검 가능
+
+추가 참고:
+- `references/domestic-airports.md`: 국내 공항/도시 코드와 한글 별칭
+- `references/international-airports.md`: 주요 국제 공항/도시 코드, `SEL-TYO` 같은 도시 코드 예시
+- `references/price-alerts-schema.md`: 가격 감시 저장 포맷과 v2→v3 마이그레이션 규칙
 
 ---
 
@@ -147,6 +172,5 @@ upstream 저장소 위치는 다음 순서로 찾습니다.
 - fallback 판단은 `fallback_decision` / `fallback_reason_codes` 로 구조화되어 남아 extraction incompleteness 우세인지 genuine time-filter rejection 우세인지 구분하기 쉽게 했습니다.
 - 사람용 출력에서는 필요할 때만 한 줄짜리 `참고:` 진단 힌트를 덧붙이고, 더 자세한 디버그성 힌트와 커버리지 수치는 JSON 메타데이터에만 남겨서 사람용 출력이 시끄러워지지 않게 유지합니다.
 - Windows 환경에서 `price_alerts.py check` 는 UTF-8 서브프로세스 모드로 검색 스크립트를 실행합니다.
-- 국제선은 범위 밖입니다.
 
 자세한 사용법은 `SKILL.md`를 참고하세요.

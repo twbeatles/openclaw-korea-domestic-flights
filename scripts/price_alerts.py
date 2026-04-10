@@ -14,7 +14,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 SKILL_DIR = SCRIPT_DIR.parent
 DEFAULT_STORE = SKILL_DIR / "price-alert-rules.json"
 KST_LABEL = "Asia/Seoul"
-DEFAULT_MESSAGE_TEMPLATE = """[국내선 가격 알림] {label}
+STORE_VERSION = 3
+DEFAULT_MESSAGE_TEMPLATE = """[항공권 가격 알림] {label}
 - 노선: {route}
 - 조건: 성인 {adults}명 · {cabin_label}
 - 목표가: {target_price}
@@ -30,12 +31,15 @@ from common_cli import (
     cabin_label,
     describe_time_preference_payload,
     format_price,
+    infer_routes_scope,
     normalize_airport,
     parse_date_range_text,
     parse_flexible_date,
     pretty_date,
+    resolve_route_scope,
     resolve_source_repo,
     seoul_now,
+    scope_cli_args,
     time_preference_cli_args,
     unique_codes,
     verify_date_order,
@@ -47,29 +51,60 @@ def now_iso() -> str:
     return seoul_now().isoformat(timespec="seconds")
 
 
+def _infer_query_scope(query: dict[str, Any]) -> str:
+    origin = str(query.get("origin") or "").strip().upper()
+    destinations = query.get("destinations") or ([query.get("destination")] if query.get("destination") else [])
+    normalized_destinations = [str(code).strip().upper() for code in destinations if str(code or "").strip()]
+    if not origin or not normalized_destinations:
+        return "auto"
+    return infer_routes_scope(origin, normalized_destinations)
+
+
+def _migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
+    migrated = dict(rule)
+    query = dict(migrated.get("query") or {})
+    migrated["query"] = query
+    notify = dict(migrated.get("notify") or {})
+    migrated["notify"] = notify
+    meta = dict(migrated.get("meta") or {})
+    migrated["meta"] = meta
+
+    notify.setdefault("channel", "stdout")
+    notify.setdefault("dedupe_key", None)
+    notify.setdefault("last_sent_at", None)
+    notify.setdefault("message_template", None)
+    meta.setdefault("source", "price_alerts.py")
+    meta.setdefault("notes", "")
+
+    if query.get("destinations"):
+        query["destinations"] = [str(code).strip().upper() for code in query["destinations"] if str(code or "").strip()]
+    elif query.get("destination"):
+        query["destinations"] = [str(query["destination"]).strip().upper()]
+    else:
+        query["destinations"] = []
+    query["destination"] = query["destinations"][0] if len(query["destinations"]) == 1 else query.get("destination")
+    query["scope"] = str(query.get("scope") or _infer_query_scope(query))
+    return migrated
+
+
 def load_store(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {
-            "version": 2,
+            "version": STORE_VERSION,
             "timezone": KST_LABEL,
             "updated_at": now_iso(),
             "rules": [],
         }
     data = json.loads(path.read_text(encoding="utf-8"))
-    data.setdefault("version", 2)
+    data["version"] = STORE_VERSION
     data.setdefault("timezone", KST_LABEL)
-    data.setdefault("rules", [])
-    for rule in data["rules"]:
-        rule.setdefault("notify", {})
-        rule["notify"].setdefault("channel", "stdout")
-        rule["notify"].setdefault("dedupe_key", None)
-        rule["notify"].setdefault("last_sent_at", None)
-        rule["notify"].setdefault("message_template", None)
+    data["rules"] = [_migrate_rule(rule) for rule in data.get("rules", []) if isinstance(rule, dict)]
     return data
 
 
 def save_store(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    data["version"] = STORE_VERSION
     data["updated_at"] = now_iso()
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -89,6 +124,7 @@ def canonical_signature(payload: dict[str, Any]) -> str:
 def make_rule(args) -> dict[str, Any]:
     origin = normalize_airport(args.origin)
     destinations = _parse_destinations(args)
+    route_scope = resolve_route_scope(origin, destinations, getattr(args, "scope", "auto"))
     if args.date_range and args.return_date:
         raise ValueError("--date-range 와 --return-date 는 함께 사용할 수 없습니다.")
     if args.return_date and args.return_offset > 0:
@@ -146,6 +182,7 @@ def make_rule(args) -> dict[str, Any]:
         "return_offset": args.return_offset,
         "adults": args.adults,
         "cabin": args.cabin,
+        "scope": args.scope if getattr(args, "scope", "auto") != "auto" else route_scope,
         "trip_type": trip_type,
         "target_price_krw": args.target_price,
         "time_preference": time_preference,
@@ -166,6 +203,7 @@ def make_rule(args) -> dict[str, Any]:
             "return_offset": args.return_offset,
             "adults": args.adults,
             "cabin": args.cabin,
+            "scope": args.scope if getattr(args, "scope", "auto") != "auto" else route_scope,
             "trip_type": trip_type,
             "time_preference": time_preference,
             "source_repo_path": stored_source_repo,
@@ -191,6 +229,7 @@ def describe_rule(rule: dict[str, Any]) -> str:
     q = rule["query"]
     destinations = q.get("destinations") or ([q["destination"]] if q.get("destination") else [])
     destination_text = ", ".join(airport_label(code) for code in destinations)
+    scope_text = str(q.get("scope") or _infer_query_scope(q))
     if q.get("date_range"):
         date_text = f"{q['date_range']['start_date']}~{q['date_range']['end_date']}"
         if q.get("return_offset"):
@@ -207,6 +246,7 @@ def describe_rule(rule: dict[str, Any]) -> str:
     return (
         f"[{state}] {rule['id']} | {rule['label']}\n"
         f"- 노선: {airport_label(q['origin'])} → {destination_text}\n"
+        f"- scope: {scope_text}\n"
         f"- 일정: {date_text}\n"
         f"- 조건: 성인 {q['adults']}명 · {cabin_label(q['cabin'])} · 목표가 {format_price(rule['target_price_krw'])}{time_pref_line}\n"
         f"- 알림: {template_flag} · 마지막 dedupe_key={rule.get('notify', {}).get('dedupe_key') or '없음'}"
@@ -234,6 +274,7 @@ def check_rule(rule: dict[str, Any], *, repo_path: str | None = None) -> dict[st
         "--adults", str(q["adults"]),
         "--cabin", q["cabin"],
     ]
+    common.extend(scope_cli_args(q.get("scope")))
     effective_repo_path = repo_path or q.get("source_repo_path")
     if effective_repo_path:
         common.extend(["--repo-path", str(effective_repo_path)])
@@ -305,7 +346,7 @@ def check_rule(rule: dict[str, Any], *, repo_path: str | None = None) -> dict[st
         }
 
     payload = run_search(
-        "search_domestic.py",
+        "search_flights.py",
         [
             *single_common,
             "--departure", q["departure"],
@@ -551,7 +592,7 @@ def command_render(args) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="대한민국 국내선 가격 감시 규칙 저장/점검 도구")
+    parser = argparse.ArgumentParser(description="항공권 가격 감시 규칙 저장/점검 도구")
     parser.add_argument("--store", default=str(DEFAULT_STORE), help="규칙 JSON 저장 파일 경로")
     parser.add_argument("--repo-path", help="upstream Scraping-flight-information 저장소 경로 override")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -566,6 +607,7 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--departure", help="단일 출발일")
     add.add_argument("--return-date", help="왕복 귀국일")
     add.add_argument("--date-range", help="날짜 범위. 예: 내일부터 3일, 2026-03-20~2026-03-22")
+    add.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"], help="노선 유형 강제")
     add.add_argument("--return-offset", type=int, default=0, help="날짜 범위 감시에서 출발일 기준 귀국일 오프셋")
     add.add_argument("--adults", type=int, default=1)
     add.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])

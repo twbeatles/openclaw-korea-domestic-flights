@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 from argparse import Namespace
@@ -14,8 +15,19 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import emit_json, parse_flexible_date, resolve_source_repo, verified_priced_rows, verify_date_order, verify_return_offset
-from price_alerts import build_notification, compute_dedupe_key, make_rule, now_iso
+from chat_search import build_dispatch
+from common_cli import (
+    emit_json,
+    infer_routes_scope,
+    normalize_airport,
+    parse_flexible_date,
+    resolve_route_scope,
+    resolve_source_repo,
+    verified_priced_rows,
+    verify_date_order,
+    verify_return_offset,
+)
+from price_alerts import STORE_VERSION, build_notification, compute_dedupe_key, load_store, make_rule, now_iso
 
 
 def _build_args(**overrides) -> Namespace:
@@ -27,6 +39,7 @@ def _build_args(**overrides) -> Namespace:
         "return_date": None,
         "date_range": None,
         "return_offset": 0,
+        "scope": "auto",
         "adults": 1,
         "cabin": "ECONOMY",
         "target_price": 100000,
@@ -120,8 +133,117 @@ def test_kst_time_and_date_helpers() -> dict:
     return {"now_iso": now_iso()}
 
 
+def test_airport_aliases_and_scope_resolution() -> dict:
+    assert normalize_airport("도쿄") == "TYO"
+    assert normalize_airport("nrt") == "NRT"
+    assert normalize_airport("LAX") == "LAX"
+    assert infer_routes_scope("GMP", ["CJU"]) == "domestic"
+    assert infer_routes_scope("ICN", ["NRT"]) == "international"
+    assert infer_routes_scope("ICN", ["NRT", "HND"]) == "international"
+    assert infer_routes_scope("GMP", ["CJU", "NRT"]) == "mixed"
+    try:
+        resolve_route_scope("ICN", ["NRT"], "domestic")
+    except ValueError as exc:
+        mismatch = str(exc)
+    else:
+        raise AssertionError("resolve_route_scope should reject forced domestic on international route")
+    return {
+        "aliases": {
+            "도쿄": normalize_airport("도쿄"),
+            "nrt": normalize_airport("nrt"),
+            "LAX": normalize_airport("LAX"),
+        },
+        "mismatch": mismatch,
+    }
+
+
+def test_price_alert_store_migrates_v2_scope() -> dict:
+    temp_dir = tempfile.mkdtemp(prefix="regression-smoke-", dir=str(SCRIPT_DIR.parent))
+    try:
+        store = Path(temp_dir) / "alerts.json"
+        store.write_text(json.dumps({
+            "version": 2,
+            "timezone": "Asia/Seoul",
+            "rules": [
+                {
+                    "id": "kdf-old",
+                    "label": "old domestic rule",
+                    "query": {
+                        "origin": "GMP",
+                        "destination": "CJU",
+                        "destinations": ["CJU"],
+                        "departure": "2026-03-25",
+                        "return_date": None,
+                        "date_range": None,
+                        "return_offset": 0,
+                        "adults": 1,
+                        "cabin": "ECONOMY",
+                        "trip_type": "one_way",
+                    },
+                    "target_price_krw": 100000,
+                }
+            ],
+        }, ensure_ascii=False), encoding="utf-8")
+        data = load_store(store)
+        assert data["version"] == STORE_VERSION
+        assert data["rules"][0]["query"]["scope"] == "domestic"
+        return {"version": data["version"], "scope": data["rules"][0]["query"]["scope"]}
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def test_chat_dispatch_routes_scope_aware_scripts() -> dict:
+    single_script, single_args = build_dispatch(Namespace(
+        origin="ICN",
+        destination="NRT",
+        destinations=None,
+        when=None,
+        departure="2026-04-20",
+        return_date=None,
+        return_offset=0,
+        scope="international",
+        adults=1,
+        cabin="ECONOMY",
+        time_pref=None,
+        depart_after=None,
+        return_after=None,
+        exclude_early_before=None,
+        prefer=None,
+        json=True,
+        repo_path=None,
+    ))
+    matrix_script, matrix_args = build_dispatch(Namespace(
+        origin="ICN",
+        destination=None,
+        destinations="NRT,KIX",
+        when="2026-04-20~2026-04-22",
+        departure=None,
+        return_date=None,
+        return_offset=2,
+        scope="international",
+        adults=1,
+        cabin="ECONOMY",
+        time_pref=None,
+        depart_after=None,
+        return_after=None,
+        exclude_early_before=None,
+        prefer=None,
+        json=True,
+        repo_path=None,
+    ))
+    assert single_script == "search_flights.py"
+    assert "--scope" in single_args and "international" in single_args
+    assert matrix_script == "search_destination_date_matrix.py"
+    assert "--scope" in matrix_args and "international" in matrix_args
+    return {
+        "single_script": single_script,
+        "matrix_script": matrix_script,
+    }
+
+
 def test_repo_resolution_works_for_standalone_layout() -> dict:
-    with tempfile.TemporaryDirectory() as temp_dir:
+    temp_dir = tempfile.mkdtemp(prefix="repo-resolution-", dir=str(SCRIPT_DIR.parent))
+    try:
         root = Path(temp_dir)
         repo_root = root / "korea-domestic-flights-skill"
         scripts_dir = repo_root / "scripts"
@@ -131,6 +253,8 @@ def test_repo_resolution_works_for_standalone_layout() -> dict:
         resolved = resolve_source_repo(script_path=scripts_dir / "search_domestic.py")
         assert resolved == source_repo
         return {"resolved": str(resolved)}
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def test_input_validation_rejects_bad_ranges() -> dict:
@@ -157,6 +281,9 @@ def main() -> None:
         "single_date_return_offset_rule_promotes_date_range": test_single_date_return_offset_rule_promotes_date_range(),
         "round_trip_dedupe_uses_return_fields": test_round_trip_dedupe_uses_return_fields(),
         "kst_time_and_date_helpers": test_kst_time_and_date_helpers(),
+        "airport_aliases_and_scope_resolution": test_airport_aliases_and_scope_resolution(),
+        "price_alert_store_migrates_v2_scope": test_price_alert_store_migrates_v2_scope(),
+        "chat_dispatch_routes_scope_aware_scripts": test_chat_dispatch_routes_scope_aware_scripts(),
         "repo_resolution_works_for_standalone_layout": test_repo_resolution_works_for_standalone_layout(),
         "input_validation_rejects_bad_ranges": test_input_validation_rejects_bad_ranges(),
     }

@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -16,6 +16,7 @@ SOURCE_REPO_ENV_VARS = ("KDF_SOURCE_REPO", "SCRAPING_FLIGHT_INFORMATION_REPO")
 WORKSPACE_ENV_VARS = ("KDF_WORKSPACE",)
 
 AIRPORT_NAMES = {
+    "ICN": "인천",
     "GMP": "김포",
     "CJU": "제주",
     "PUS": "부산",
@@ -29,9 +30,22 @@ AIRPORT_NAMES = {
     "YNY": "양양",
     "MWX": "무안",
     "SEL": "서울",
+    "NRT": "도쿄 나리타",
+    "HND": "도쿄 하네다",
+    "TYO": "도쿄",
+    "KIX": "오사카 간사이",
+    "OSA": "오사카",
+    "FUK": "후쿠오카",
+    "BKK": "방콕",
+    "SIN": "싱가포르",
+    "HKG": "홍콩",
+    "SGN": "호치민",
+    "DAD": "다낭",
+    "DPS": "발리",
 }
 
 AIRPORT_ALIASES = {
+    "인천": "ICN",
     "김포": "GMP",
     "제주": "CJU",
     "제주도": "CJU",
@@ -49,6 +63,22 @@ AIRPORT_ALIASES = {
     "양양": "YNY",
     "무안": "MWX",
     "서울": "SEL",
+    "나리타": "NRT",
+    "도쿄 나리타": "NRT",
+    "하네다": "HND",
+    "도쿄 하네다": "HND",
+    "도쿄": "TYO",
+    "간사이": "KIX",
+    "오사카 간사이": "KIX",
+    "오사카": "OSA",
+    "후쿠오카": "FUK",
+    "방콕": "BKK",
+    "싱가포르": "SIN",
+    "홍콩": "HKG",
+    "호치민": "SGN",
+    "다낭": "DAD",
+    "발리": "DPS",
+    "incheon": "ICN",
     "gimpo": "GMP",
     "jeju": "CJU",
     "busan": "PUS",
@@ -62,6 +92,70 @@ AIRPORT_ALIASES = {
     "yangyang": "YNY",
     "muan": "MWX",
     "seoul": "SEL",
+    "narita": "NRT",
+    "haneda": "HND",
+    "tokyo": "TYO",
+    "kansai": "KIX",
+    "osaka": "OSA",
+    "fukuoka": "FUK",
+    "bangkok": "BKK",
+    "singapore": "SIN",
+    "hong kong": "HKG",
+    "hongkong": "HKG",
+    "ho chi minh": "SGN",
+    "hochiminh": "SGN",
+    "da nang": "DAD",
+    "danang": "DAD",
+    "bali": "DPS",
+}
+
+DOMESTIC_AIRPORT_CODES = {
+    "ICN",
+    "GMP",
+    "CJU",
+    "PUS",
+    "TAE",
+    "CJJ",
+    "KWJ",
+    "RSU",
+    "USN",
+    "HIN",
+    "KPO",
+    "YNY",
+    "MWX",
+    "SEL",
+}
+
+CITY_CODES_MAP = {
+    "ICN": "SEL",
+    "GMP": "SEL",
+    "NRT": "TYO",
+    "HND": "TYO",
+    "KIX": "OSA",
+}
+
+RESULT_FIELD_DEFAULTS = {
+    "airline": "",
+    "price": 0,
+    "currency": "KRW",
+    "departure_time": "",
+    "arrival_time": "",
+    "duration": "",
+    "stops": 0,
+    "flight_number": "",
+    "source": "",
+    "return_departure_time": "",
+    "return_arrival_time": "",
+    "return_duration": "",
+    "return_stops": 0,
+    "is_round_trip": False,
+    "outbound_price": 0,
+    "return_price": 0,
+    "return_airline": "",
+    "benefit_price": 0,
+    "benefit_label": "",
+    "confidence": 0,
+    "extraction_source": "",
 }
 
 WEEKDAY_ALIASES = {
@@ -111,7 +205,87 @@ def normalize_airport(value: str) -> str:
         return AIRPORT_ALIASES[lowered]
     if raw in AIRPORT_ALIASES:
         return AIRPORT_ALIASES[raw]
+    if re.fullmatch(r"[A-Za-z]{3}", raw):
+        return upper
     raise ValueError(f"지원하지 않는 공항 입력입니다: {value}")
+
+
+def _route_scope_code(code: str) -> str:
+    normalized = (code or "").upper()
+    return CITY_CODES_MAP.get(normalized, normalized)
+
+
+def infer_route_scope(origin: str, destination: str) -> str:
+    origin_code = (origin or "").upper()
+    destination_code = (destination or "").upper()
+    origin_domestic = origin_code in DOMESTIC_AIRPORT_CODES or _route_scope_code(origin_code) in DOMESTIC_AIRPORT_CODES
+    destination_domestic = destination_code in DOMESTIC_AIRPORT_CODES or _route_scope_code(destination_code) in DOMESTIC_AIRPORT_CODES
+    return "domestic" if origin_domestic and destination_domestic else "international"
+
+
+def infer_routes_scope(origin: str, destinations: Sequence[str]) -> str:
+    route_scopes = {infer_route_scope(origin, destination) for destination in destinations if destination}
+    if not route_scopes:
+        return "international"
+    if len(route_scopes) == 1:
+        return next(iter(route_scopes))
+    return "mixed"
+
+
+def resolve_route_scope(origin: str, destinations: Sequence[str], requested_scope: str = "auto") -> str:
+    route_scope = infer_routes_scope(origin, destinations)
+    requested = (requested_scope or "auto").lower()
+    if requested not in {"auto", "domestic", "international"}:
+        raise ValueError(f"지원하지 않는 scope 입니다: {requested_scope}")
+    if requested != "auto" and route_scope != requested:
+        if requested == "domestic":
+            raise ValueError("국내선 scope 로 강제했지만 국제선 노선이 포함되어 있습니다.")
+        raise ValueError("국제선 scope 로 강제했지만 국내선 노선이 포함되어 있습니다.")
+    return route_scope
+
+
+def route_scope_label(scope: str) -> str:
+    return {
+        "auto": "자동",
+        "domestic": "국내선",
+        "international": "국제선",
+        "mixed": "혼합",
+    }.get((scope or "").lower(), scope or "")
+
+
+def normalize_result_payload(item) -> dict:
+    if is_dataclass(item):
+        data = asdict(item)
+    elif hasattr(item, "__dict__"):
+        data = dict(item.__dict__)
+    elif isinstance(item, dict):
+        data = dict(item)
+    else:
+        data = {"value": str(item)}
+
+    normalized = {}
+    for key, default in RESULT_FIELD_DEFAULTS.items():
+        value = data.get(key, default)
+        normalized[key] = default if value is None else value
+
+    for key, value in data.items():
+        if key not in normalized:
+            normalized[key] = value
+    return normalized
+
+
+def benefit_text(item: dict | None) -> str | None:
+    if not item:
+        return None
+    benefit_price = int(item.get("benefit_price", 0) or 0)
+    price = int(item.get("price", 0) or 0)
+    if benefit_price <= 0 or benefit_price == price:
+        return None
+    label = str(item.get("benefit_label") or "").strip()
+    parts = [f"혜택가 {format_price(benefit_price)}"]
+    if label:
+        parts.append(label)
+    return " · ".join(parts)
 
 
 def seoul_now() -> datetime:
@@ -617,6 +791,13 @@ def time_preference_cli_args(time_pref: dict | None) -> list[str]:
     return args
 
 
+def scope_cli_args(scope: str | None) -> list[str]:
+    text = str(scope or "").strip().lower()
+    if text in {"domestic", "international", "auto"}:
+        return ["--scope", text]
+    return []
+
+
 def describe_time_preference_payload(time_pref: dict | None) -> str | None:
     tp = time_pref or {}
     pref = apply_time_overrides(
@@ -806,6 +987,9 @@ def build_best_option_reasons(best: dict | None, next_price: int | None = None, 
             reasons.append(f"오는편 {ret_depart}→{ret_arrive}")
         else:
             reasons.append(f"오는편 {ret_depart} 출발")
+    benefit = benefit_text(best)
+    if benefit:
+        reasons.append(benefit)
     if pref and pref.describe():
         reasons.append(f"시간 조건 '{pref.describe()}' 반영")
     price = int(best.get("price", 0) or best.get("cheapest_price", 0) or 0)

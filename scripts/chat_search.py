@@ -8,7 +8,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from common_cli import parse_date_range_text, time_preference_cli_args
+from common_cli import parse_date_range_text, scope_cli_args, time_preference_cli_args
 
 
 def run_script(script_name: str, extra_args: list[str]) -> int:
@@ -30,29 +30,15 @@ def repo_args(args) -> list[str]:
     return ["--repo-path", args.repo_path] if args.repo_path else []
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Chat-friendly wrapper for Korea domestic flight search")
-    parser.add_argument("--origin", required=True, help="예: 김포")
-    parser.add_argument("--destination", help="단일 목적지")
-    parser.add_argument("--destinations", help="여러 목적지, 예: 제주,부산,여수")
-    parser.add_argument("--when", help="단일 날짜 또는 날짜 범위. 예: 내일, 이번주말, 내일부터 3일")
-    parser.add_argument("--departure")
-    parser.add_argument("--return-date")
-    parser.add_argument("--return-offset", type=int, default=0)
-    parser.add_argument("--adults", type=int, default=1)
-    parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
-    parser.add_argument("--time-pref", help="예: 오전, 저녁, 출발 10시 이후, 복귀 18시 이후, 너무 이른 비행 제외 8시, 늦은 시간 선호")
-    parser.add_argument("--depart-after")
-    parser.add_argument("--return-after")
-    parser.add_argument("--exclude-early-before")
-    parser.add_argument("--prefer", choices=["late", "morning", "afternoon", "evening"])
-    parser.add_argument("--json", action="store_true", help="JSON 출력")
-    parser.add_argument("--repo-path", help="upstream Scraping-flight-information 저장소 경로")
-    args = parser.parse_args()
+def scope_args(args) -> list[str]:
+    return scope_cli_args(getattr(args, "scope", None))
 
+
+def build_dispatch(args):
     human = [] if args.json else ["--human"]
     extra_time_args = time_args(args)
     extra_repo_args = repo_args(args)
+    extra_scope_args = scope_args(args)
 
     has_multi_dest = bool(args.destinations and "," in args.destinations or (args.destinations and args.destination))
     destinations_value = args.destinations or args.destination
@@ -63,7 +49,7 @@ def main():
         start_dt, end_dt = parse_date_range_text(args.when)
         inferred_single_day = start_dt == end_dt
         if has_multi_dest and (not inferred_single_day or (args.return_offset > 0 and not args.return_date)):
-            return run_script(
+            return (
                 "search_destination_date_matrix.py",
                 [
                     "--origin", args.origin,
@@ -73,13 +59,14 @@ def main():
                     "--return-offset", str(args.return_offset),
                     "--adults", str(args.adults),
                     "--cabin", args.cabin,
+                    *extra_scope_args,
                     *extra_repo_args,
                     *extra_time_args,
                     *human,
                 ],
             )
         if has_multi_dest:
-            return run_script(
+            return (
                 "search_multi_destination.py",
                 [
                     "--origin", args.origin,
@@ -88,13 +75,14 @@ def main():
                     *(["--return-date", args.return_date] if args.return_date else []),
                     "--adults", str(args.adults),
                     "--cabin", args.cabin,
+                    *extra_scope_args,
                     *extra_repo_args,
                     *extra_time_args,
                     *human,
                 ],
             )
         if not inferred_single_day or (args.return_offset > 0 and not args.return_date):
-            return run_script(
+            return (
                 "search_date_range.py",
                 [
                     "--origin", args.origin,
@@ -104,13 +92,14 @@ def main():
                     "--return-offset", str(args.return_offset),
                     "--adults", str(args.adults),
                     "--cabin", args.cabin,
+                    *extra_scope_args,
                     *extra_repo_args,
                     *extra_time_args,
                     *human,
                 ],
             )
-        return run_script(
-            "search_domestic.py",
+        return (
+            "search_flights.py",
             [
                 "--origin", args.origin,
                 "--destination", destinations_value,
@@ -118,6 +107,7 @@ def main():
                 *(["--return-date", args.return_date] if args.return_date else []),
                 "--adults", str(args.adults),
                 "--cabin", args.cabin,
+                *extra_scope_args,
                 *extra_repo_args,
                 *extra_time_args,
                 *human,
@@ -125,7 +115,7 @@ def main():
         )
 
     if has_multi_dest and args.departure and args.return_offset > 0 and not args.return_date:
-        return run_script(
+        return (
             "search_destination_date_matrix.py",
             [
                 "--origin", args.origin,
@@ -135,6 +125,7 @@ def main():
                 "--return-offset", str(args.return_offset),
                 "--adults", str(args.adults),
                 "--cabin", args.cabin,
+                *extra_scope_args,
                 *extra_repo_args,
                 *extra_time_args,
                 *human,
@@ -142,7 +133,7 @@ def main():
         )
 
     if args.departure and args.return_offset > 0 and not args.return_date:
-        return run_script(
+        return (
             "search_date_range.py",
             [
                 "--origin", args.origin,
@@ -152,6 +143,7 @@ def main():
                 "--return-offset", str(args.return_offset),
                 "--adults", str(args.adults),
                 "--cabin", args.cabin,
+                *extra_scope_args,
                 *extra_repo_args,
                 *extra_time_args,
                 *human,
@@ -159,15 +151,16 @@ def main():
         )
 
     if has_multi_dest and args.departure:
-        return run_script(
+        return (
             "search_multi_destination.py",
             [
                 "--origin", args.origin,
                 "--destinations", destinations_value,
                 "--departure", args.departure,
-                *( ["--return-date", args.return_date] if args.return_date else []),
+                *(["--return-date", args.return_date] if args.return_date else []),
                 "--adults", str(args.adults),
                 "--cabin", args.cabin,
+                *extra_scope_args,
                 *extra_repo_args,
                 *extra_time_args,
                 *human,
@@ -175,8 +168,8 @@ def main():
         )
 
     if args.departure:
-        return run_script(
-            "search_domestic.py",
+        return (
+            "search_flights.py",
             [
                 "--origin", args.origin,
                 "--destination", destinations_value,
@@ -184,6 +177,7 @@ def main():
                 *(["--return-date", args.return_date] if args.return_date else []),
                 "--adults", str(args.adults),
                 "--cabin", args.cabin,
+                *extra_scope_args,
                 *extra_repo_args,
                 *extra_time_args,
                 *human,
@@ -191,6 +185,30 @@ def main():
         )
 
     raise SystemExit("날짜 정보가 없습니다. --when 또는 --departure 를 제공하세요.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Chat-friendly wrapper for flight search")
+    parser.add_argument("--origin", required=True, help="예: 김포")
+    parser.add_argument("--destination", help="단일 목적지")
+    parser.add_argument("--destinations", help="여러 목적지, 예: 제주,부산,여수")
+    parser.add_argument("--when", help="단일 날짜 또는 날짜 범위. 예: 내일, 이번주말, 내일부터 3일")
+    parser.add_argument("--departure")
+    parser.add_argument("--return-date")
+    parser.add_argument("--return-offset", type=int, default=0)
+    parser.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"])
+    parser.add_argument("--adults", type=int, default=1)
+    parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
+    parser.add_argument("--time-pref", help="예: 오전, 저녁, 출발 10시 이후, 복귀 18시 이후, 너무 이른 비행 제외 8시, 늦은 시간 선호")
+    parser.add_argument("--depart-after")
+    parser.add_argument("--return-after")
+    parser.add_argument("--exclude-early-before")
+    parser.add_argument("--prefer", choices=["late", "morning", "afternoon", "evening"])
+    parser.add_argument("--json", action="store_true", help="JSON 출력")
+    parser.add_argument("--repo-path", help="upstream Scraping-flight-information 저장소 경로")
+    args = parser.parse_args()
+    script_name, extra_args = build_dispatch(args)
+    return run_script(script_name, extra_args)
 
 
 if __name__ == "__main__":
