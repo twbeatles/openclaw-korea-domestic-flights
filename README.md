@@ -165,6 +165,10 @@ upstream 저장소 위치는 다음 순서로 찾습니다.
 
 ## 한계 / 주의점
 
+- 국제선 지원은 현재 **검색/비교/날짜 범위/감시 흐름 중심**이며, 모든 국가/항공사/운임 규칙을 완전하게 보장하지는 않습니다.
+- 특히 국제선은 upstream 사이트 구조, 노선별 공급 데이터, 브라우저 환경에 따라 결과 편차가 국내선보다 클 수 있습니다.
+- `scope=auto` 는 편하지만, 국제선으로 명확한 질의라면 `--scope international` 을 명시하는 편이 더 안정적입니다.
+- 도시 코드(`TYO`, `SEL`)와 공항 코드(`NRT`, `ICN`)가 섞이면 의도와 다른 범위가 잡힐 수 있어, 운영 자동화에서는 가능한 한 명시적 코드 사용을 권장합니다.
 - 실제 검색은 외부 사이트 상태와 브라우저 환경에 영향을 받습니다.
 - 날짜 범위/다중 목적지/왕복 검색은 실행 시간이 길 수 있지만, 시간 조건이 있는 범위/매트릭스 검색은 하이브리드 최적화로 전체 조합을 먼저 빠르게 훑은 뒤 저가 후보·인접 날짜·커버리지 앵커를 함께 상세 검색합니다.
 - 상세 재검증 후 시간 조건 일치 결과가 너무 적으면 fallback 후보 확장을 추가로 수행할 수 있습니다.
@@ -172,5 +176,23 @@ upstream 저장소 위치는 다음 순서로 찾습니다.
 - fallback 판단은 `fallback_decision` / `fallback_reason_codes` 로 구조화되어 남아 extraction incompleteness 우세인지 genuine time-filter rejection 우세인지 구분하기 쉽게 했습니다.
 - 사람용 출력에서는 필요할 때만 한 줄짜리 `참고:` 진단 힌트를 덧붙이고, 더 자세한 디버그성 힌트와 커버리지 수치는 JSON 메타데이터에만 남겨서 사람용 출력이 시끄러워지지 않게 유지합니다.
 - Windows 환경에서 `price_alerts.py check` 는 UTF-8 서브프로세스 모드로 검색 스크립트를 실행합니다.
+
+## 운영용 smoke check 루틴
+
+배포 전에는 최소 아래 순서로 점검하는 것을 권장합니다.
+
+```bash
+python scripts/search_flights.py --origin GMP --destination CJU --departure 내일 --human
+python scripts/search_flights.py --origin ICN --destination NRT --departure 내일 --scope international --human
+python scripts/search_date_range.py --origin ICN --destination KIX --date-range "다음주말" --scope international --human
+python scripts/price_alerts.py list --json
+python scripts/regression_smoke_check.py
+```
+
+권장 확인 포인트:
+- 국내선 1건, 국제선 1건이 모두 정상 라우팅되는지
+- `query.scope` 와 `summary.route_scope` 가 기대대로 찍히는지
+- 시간 조건/날짜 범위 쿼리에서 fallback 메타가 과도하게 발생하지 않는지
+- alert state 파일이 로컬 상태만 갱신하고 git diff를 더럽히지 않는지
 
 자세한 사용법은 `SKILL.md`를 참고하세요.
