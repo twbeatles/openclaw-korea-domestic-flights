@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "twbeatles" }]
 license = "MIT"
-keywords = ["openclaw", "flights", "korea", "interpark", "playwright"]
+keywords = ["openclaw", "flights", "korea", "interpark", "playwright", "lcc", "price-alerts", "flight-search"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -40,6 +40,7 @@ where = ["src"]
   "references/domestic-airports.md",
   "references/international-airports.md",
   "references/price-alerts-schema.md",
+  "references/search-keywords.md",
 ]
 
 [tool.pytest.ini_options]

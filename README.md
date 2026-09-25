@@ -9,16 +9,22 @@
 - 런타임 스크래핑 코어: 로컬 `Scraping-flight-information` 저장소 adapter
 
 이 저장소는 스크래핑 코어를 복사하지 않습니다. `D:\twbeatles-repos\Scraping-flight-information` 같은 로컬 Flight Bot 저장소를 찾아 `scraping.searcher.FlightSearcher`와 `scraping.parallel.ParallelSearcher`를 adapter로 감쌉니다.
+원본의 공항 정규화·도시 코드 매핑·항공사 분류(`core/airports.py`)·GUI 필터 패널(직항만/LCC·FSC/경유/가격대)·강제재조회·소아/유아 승객 규격은
+`korea_flights.airlines`/`airports`/`strategy`/`cli`로 이식되어 패키지 단독으로 동작합니다.
 
 ## 주요 기능
 
-- 단일 노선 검색: 국내선/국제선, 편도/왕복, 좌석등급, 성인 수
+- 단일 노선 검색: 국내선/국제선, 편도/왕복, 좌석등급, 성인/소아/유아 수
 - 날짜 범위 검색: 기본 최대 45일, `--max-days`로 조정
 - 목적지+날짜 매트릭스: 기본 최대 120조합, `--max-combos`로 조정
 - 하이브리드 전략 엔진: `broad_scan -> candidate_scoring -> detailed_refine -> diagnostic_fallback -> final_ranking`
 - 시간 조건: `저녁`, `출발 10시 이후`, `복귀 18시 이후`, `늦은 시간 선호`
+- 항공사/경유/가격 필터: `--airline LCC|FSC`, `--nonstop-only`, `--max-stops`, `--min-price`/`--max-price` (혜택가 적용 실질가 기준)
+- 강제재조회: `--force-refresh` (원본 `Ctrl+Shift+Enter` 대응, 검색 캐시 무시)
+- 검색 키워드 사전: `references/search-keywords.md` (공항 한·영 별칭, 날짜/시간 키워드, 자연어 예시)
 - 안정 JSON 계약: `status`, `query`, `summary`, `results`, `strategy_metadata`, `diagnostics`, `logs`
-- 가격 감시 저장소: 목표가, dedupe, custom message template, 다중 목적지/날짜 범위 지원
+- 결과 확장 필드: `airline_category` (LCC/FSC/OTHER), `effective_price` (원본 `effective_flight_price` 대응)
+- 가격 감시 저장소: 목표가, dedupe, custom message template, 다중 목적지/날짜 범위 지원, 항공사·경유·가격 필터 포함
 - 패키징: wheel/sdist와 `korea-flights` console script
 - 배포 계약: PyInstaller `.spec` 파일 없이 `pyproject.toml` 기반 Python 패키지로 검증
 
@@ -60,6 +66,14 @@ korea-flights search --origin 김포 --destination 제주 --departure 내일 --h
 korea-flights search --origin ICN --destination NRT --departure 내일 --scope international --json
 ```
 
+필터 검색 (원본 GUI 필터 패널 이식):
+
+```bash
+korea-flights search --origin ICN --destination CTS --departure 내일 --nonstop-only --human
+korea-flights search --origin ICN --destination KIX --departure 내일 --airline LCC --max-price 200000 --human
+korea-flights search --origin ICN --destination TPE --departure 2026-09-10 --return-date 2026-09-13 --child 1 --force-refresh --human
+```
+
 날짜 범위 검색:
 
 ```bash
@@ -78,6 +92,7 @@ korea-flights matrix --origin 김포 --destinations 제주,부산,여수 --start
 
 ```bash
 korea-flights alert add --origin 김포 --destination 제주 --date-range "다음주말" --return-offset 2 --target-price 150000 --time-pref "복귀 18시 이후"
+korea-flights alert add --origin ICN --destination CTS --departure 내일 --target-price 200000 --nonstop-only --airline LCC
 korea-flights alert list
 korea-flights alert check --no-dedupe
 ```
@@ -90,6 +105,12 @@ korea-flights live-smoke --repo-path D:\twbeatles-repos\Scraping-flight-informat
 
 `live-smoke`는 가격 자체를 고정 검증하지 않고 국내선/국제선 검색이 비정상 종료되지 않는지와 결과 source 신호를 확인합니다.
 
+실측 예시 (2026-09-25, 출발 30일 뒤 기준, Playwright live):
+
+- 국내선 `GMP→CJU`: 5건, `domestic_api`, 최저가 50,800원
+- 국제선 `ICN→NRT`: 5건, `international_primary`, 최저가 124,700원
+- 필터 검색 `--nonstop-only --airline LCC`: 원본 10건 중 2건 탈락, 8건 전부 LCC 직항 (최저가 이스타항공 50,800원)
+
 ## 전략 엔진
 
 `HybridStrategyEngine`은 날짜 범위와 매트릭스 검색에서 같은 파이프라인을 사용합니다.
@@ -100,6 +121,9 @@ korea-flights live-smoke --repo-path D:\twbeatles-repos\Scraping-flight-informat
 4. `diagnostic_fallback`: 추출 불완전, 시간 조건 탈락, broad/detail 불일치가 강하면 후보를 추가 검증합니다.
 5. `final_ranking`: 시간 조건이 있으면 상세 검증과 시간 조건을 통과한 결과만 추천에 반영합니다.
 
+항공사/경유/가격 필터는 시간 조건보다 먼저 옵션 단위로 적용됩니다. 상세 검증에서 옵션은 있지만 필터를 통과한 결과가 없으면
+진단에 `airline_filter_no_match`가 기록됩니다.
+
 상세 결과는 upstream 필드를 최대한 보존합니다.
 
 - `duration`, `return_duration`
@@ -107,6 +131,11 @@ korea-flights live-smoke --repo-path D:\twbeatles-repos\Scraping-flight-informat
 - `flight_number`
 - `benefit_price`, `benefit_label`
 - `source`, `extraction_source`, `confidence`
+
+패키지가 추가하는 정규화 필드:
+
+- `airline_category`: `LCC`/`FSC`/`OTHER` (원본 `get_airline_category` 대응)
+- `effective_price`: `min(price, benefit_price)` (원본 `effective_flight_price` 대응, 가격 필터 기준값)
 
 ## Legacy 스크립트
 

@@ -14,7 +14,7 @@ from korea_flights.strategy import HybridStrategyEngine, StrategyLimits
 
 
 class FakeAdapter:
-    def broad_date_range(self, *, origin, destination, dates, return_offset=0, adults=1, cabin_class="ECONOMY", progress_callback=None):
+    def broad_date_range(self, *, origin, destination, dates, return_offset=0, adults=1, child=0, infant=0, cabin_class="ECONOMY", progress_callback=None):
         prices = {
             "20260325": (120000, "대한항공"),
             "20260326": (90000, "진에어"),
@@ -23,7 +23,7 @@ class FakeAdapter:
         }
         return {date: prices.get(date, (0, "N/A")) for date in dates}
 
-    def search(self, *, origin, destination, departure_date, return_date=None, adults=1, cabin_class="ECONOMY", max_results=1000, background_mode=False, progress_callback=None):
+    def search(self, *, origin, destination, departure_date, return_date=None, adults=1, child=0, infant=0, cabin_class="ECONOMY", max_results=1000, background_mode=False, force_refresh=False, progress_callback=None):
         if departure_date == "2026-03-26":
             return [
                 {

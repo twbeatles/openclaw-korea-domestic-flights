@@ -1,7 +1,9 @@
 # 대한민국 국내선 주요 공항 코드
 
 이 목록은 자주 쓰는 국내선 매핑 예시다. raw 3자리 uppercase 코드는 별칭 테이블에 없어도 그대로 통과되고, `SEL` 은 서울 묶음 코드로 입력할 수 있다.
+전체 키워드 사전은 `references/search-keywords.md`를 본다.
 
+- `ICN` — 인천
 - `GMP` — 김포
 - `CJU` — 제주
 - `PUS` — 부산(김해)
@@ -18,6 +20,7 @@
 
 ## 한글 입력 별칭 예시
 
+- `인천` → `ICN`
 - `김포` → `GMP`
 - `제주`, `제주도` → `CJU`
 - `부산`, `김해` → `PUS`
@@ -48,10 +51,12 @@
 - 청주 제주 3일 범위로 최저가 비교해줘
 - 김포 제주 왕복 2박 기준 날짜별 최저가 찾아줘
 - 김포 출발로 제주, 부산, 여수 중 어디가 제일 싼지 비교해줘
+- 김포 제주 직항만 저녁 출발로 찾아줘 (`--nonstop-only --time-pref "저녁"`)
 
 ## CLI 예시
 
 - `korea-flights search --origin GMP --destination CJU --departure 내일 --human`
 - `korea-flights search --origin SEL --destination CJU --departure 내일 --human`
+- `korea-flights search --origin GMP --destination CJU --departure 내일 --nonstop-only --airline LCC --human`
 
 기존 `scripts/search_flights.py`는 호환용 forwarder로만 유지된다. 새 자동화와 문서는 `korea-flights` 패키지 CLI를 기준으로 작성한다.

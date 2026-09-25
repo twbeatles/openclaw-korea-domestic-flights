@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Sequence
 
+from .airlines import annotate_airline_category
+
 RESULT_FIELD_DEFAULTS = {
     "airline": "",
     "price": 0,
@@ -41,7 +43,7 @@ def normalize_result_payload(item) -> dict:
         data = {"value": str(item)}
     normalized = {key: (data.get(key, default) if data.get(key, default) is not None else default) for key, default in RESULT_FIELD_DEFAULTS.items()}
     normalized.update({key: value for key, value in data.items() if key not in normalized})
-    return normalized
+    return annotate_airline_category(normalized)
 
 
 def make_broad_row(

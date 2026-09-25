@@ -5,7 +5,7 @@ import sys
 from argparse import Namespace
 
 from .cli import main as cli_main
-from .dates import parse_date_range_text, pretty_date, return_offset_from_dates
+from .dates import parse_date_range_text, pretty_date
 
 
 def build_dispatch(args: Namespace) -> tuple[str, list[str]]:
@@ -16,20 +16,33 @@ def build_dispatch(args: Namespace) -> tuple[str, list[str]]:
         getattr(args, "scope", "auto"),
         "--adults",
         str(getattr(args, "adults", 1)),
+        "--child",
+        str(getattr(args, "child", 0) or 0),
+        "--infant",
+        str(getattr(args, "infant", 0) or 0),
         "--cabin",
         getattr(args, "cabin", "ECONOMY"),
     ]
     if getattr(args, "repo_path", None):
         common.extend(["--repo-path", args.repo_path])
+    if getattr(args, "force_refresh", False):
+        common.append("--force-refresh")
+    if getattr(args, "airline", None):
+        common.extend(["--airline", str(args.airline)])
+    if getattr(args, "nonstop_only", False):
+        common.append("--nonstop-only")
     for source_name, flag in [
         ("time_pref", "--time-pref"),
         ("depart_after", "--depart-after"),
         ("return_after", "--return-after"),
         ("exclude_early_before", "--exclude-early-before"),
         ("prefer", "--prefer"),
+        ("max_stops", "--max-stops"),
+        ("min_price", "--min-price"),
+        ("max_price", "--max-price"),
     ]:
         value = getattr(args, source_name, None)
-        if value:
+        if value is not None and value is not False:
             common.extend([flag, str(value)])
     if getattr(args, "json", False):
         common.append("--json")
@@ -99,7 +112,15 @@ def parse_chat_args(argv: list[str]) -> Namespace:
     parser.add_argument("--return-offset", type=int, default=0)
     parser.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"])
     parser.add_argument("--adults", type=int, default=1)
+    parser.add_argument("--child", type=int, default=0)
+    parser.add_argument("--infant", type=int, default=0)
     parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
+    parser.add_argument("--force-refresh", action="store_true")
+    parser.add_argument("--airline", default=None, choices=["all", "LCC", "FSC"])
+    parser.add_argument("--nonstop-only", action="store_true")
+    parser.add_argument("--max-stops", type=int, default=None)
+    parser.add_argument("--min-price", type=int, default=None)
+    parser.add_argument("--max-price", type=int, default=None)
     parser.add_argument("--time-pref")
     parser.add_argument("--depart-after")
     parser.add_argument("--return-after")

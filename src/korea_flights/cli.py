@@ -13,7 +13,15 @@ from .strategy import HybridStrategyEngine, StrategyLimits
 def _add_common_search_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"])
     parser.add_argument("--adults", type=int, default=1)
+    parser.add_argument("--child", type=int, default=0, help="소아 승객 수 (0~9, 원본 FlightSearcher 규격)")
+    parser.add_argument("--infant", type=int, default=0, help="유아 승객 수 (0~9, 원본 FlightSearcher 규격)")
     parser.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
+    parser.add_argument("--force-refresh", action="store_true", help="검색 캐시를 무시하고 실시간 재조회 (원본 강제재조회)")
+    parser.add_argument("--airline", default=None, choices=["all", "LCC", "FSC"], help="항공사 분류 필터 (원본 GUI 필터 이식)")
+    parser.add_argument("--nonstop-only", action="store_true", help="직항만 표시 (원본 직항만 필터 이식)")
+    parser.add_argument("--max-stops", type=int, default=None, help="허용 최대 경유 횟수 (원본 경유 필터 이식)")
+    parser.add_argument("--min-price", type=int, default=None, help="최저 실질가 하한 (원, 혜택가 적용 기준)")
+    parser.add_argument("--max-price", type=int, default=None, help="최고 실질가 상한 (원, 혜택가 적용 기준)")
     parser.add_argument("--time-pref")
     parser.add_argument("--depart-after")
     parser.add_argument("--return-after")
@@ -51,6 +59,26 @@ def _print_payload(payload: dict, *, as_json: bool) -> int:
     return 0
 
 
+def _search_kwargs(args) -> dict:
+    return {
+        "adults": args.adults,
+        "child": getattr(args, "child", 0) or 0,
+        "infant": getattr(args, "infant", 0) or 0,
+        "cabin": args.cabin,
+        "force_refresh": getattr(args, "force_refresh", False),
+        "airline": getattr(args, "airline", None),
+        "nonstop_only": getattr(args, "nonstop_only", False),
+        "max_stops": getattr(args, "max_stops", None),
+        "min_price": getattr(args, "min_price", None),
+        "max_price": getattr(args, "max_price", None),
+        "time_pref": args.time_pref,
+        "depart_after": args.depart_after,
+        "return_after": args.return_after,
+        "exclude_early_before": args.exclude_early_before,
+        "prefer": args.prefer,
+    }
+
+
 def command_search(args) -> int:
     payload = _engine(args).search_single(
         origin=args.origin,
@@ -58,14 +86,8 @@ def command_search(args) -> int:
         departure=args.departure,
         return_date=args.return_date,
         scope=args.scope,
-        adults=args.adults,
-        cabin=args.cabin,
         max_results=args.max_results,
-        time_pref=args.time_pref,
-        depart_after=args.depart_after,
-        return_after=args.return_after,
-        exclude_early_before=args.exclude_early_before,
-        prefer=args.prefer,
+        **_search_kwargs(args),
     )
     return _print_payload(payload, as_json=args.json)
 
@@ -79,13 +101,7 @@ def command_range(args) -> int:
         date_range=args.date_range,
         return_offset=args.return_offset,
         scope=args.scope,
-        adults=args.adults,
-        cabin=args.cabin,
-        time_pref=args.time_pref,
-        depart_after=args.depart_after,
-        return_after=args.return_after,
-        exclude_early_before=args.exclude_early_before,
-        prefer=args.prefer,
+        **_search_kwargs(args),
     )
     return _print_payload(payload, as_json=args.json)
 
@@ -102,13 +118,7 @@ def command_matrix(args) -> int:
         return_date=args.return_date,
         return_offset=args.return_offset,
         scope=args.scope,
-        adults=args.adults,
-        cabin=args.cabin,
-        time_pref=args.time_pref,
-        depart_after=args.depart_after,
-        return_after=args.return_after,
-        exclude_early_before=args.exclude_early_before,
-        prefer=args.prefer,
+        **_search_kwargs(args),
     )
     return _print_payload(payload, as_json=args.json)
 
@@ -334,8 +344,15 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--scope", default="auto", choices=["auto", "domestic", "international"])
     add.add_argument("--return-offset", type=int, default=0)
     add.add_argument("--adults", type=int, default=1)
+    add.add_argument("--child", type=int, default=0)
+    add.add_argument("--infant", type=int, default=0)
     add.add_argument("--cabin", default="ECONOMY", choices=["ECONOMY", "BUSINESS", "FIRST"])
     add.add_argument("--target-price", type=int, required=True)
+    add.add_argument("--airline", default=None, choices=["all", "LCC", "FSC"])
+    add.add_argument("--nonstop-only", action="store_true")
+    add.add_argument("--max-stops", type=int, default=None)
+    add.add_argument("--min-price", type=int, default=None)
+    add.add_argument("--max-price", type=int, default=None)
     add.add_argument("--time-pref")
     add.add_argument("--depart-after")
     add.add_argument("--return-after")

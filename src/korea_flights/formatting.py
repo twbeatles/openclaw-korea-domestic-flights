@@ -52,6 +52,15 @@ def option_text(item: dict) -> str:
         time_bits.append(join_nonempty([format_time_or_fallback(item.get("departure_time")), item.get("arrival_time")], " -> "))
     if item.get("return_departure_time") or item.get("return_arrival_time"):
         time_bits.append("오는편 " + join_nonempty([format_time_or_fallback(item.get("return_departure_time")), item.get("return_arrival_time")], " -> "))
+    category = str(item.get("airline_category") or "").strip()
+    category_text = f"[{category}]" if category and category != "OTHER" else None
+    stops = item.get("stops")
+    stops_text = None
+    try:
+        if stops is not None and int(stops) > 0:
+            stops_text = f"경유 {int(stops)}회"
+    except (TypeError, ValueError):
+        stops_text = None
     return join_nonempty(
         [
             subject,
@@ -60,6 +69,8 @@ def option_text(item: dict) -> str:
             format_price(item.get("price", 0)),
             benefit_text(item),
             item.get("airline") if item.get("destination_label") else None,
+            category_text,
+            stops_text,
             join_nonempty(time_bits),
         ]
     )
@@ -146,12 +157,26 @@ def format_human(payload: dict) -> str:
     summary = payload.get("summary", {})
     lines = [summary.get("headline") or payload.get("status", "")]
     if query:
+        passengers = f"성인 {query.get('adults', 1)}명"
+        if int(query.get("child", 0) or 0):
+            passengers += f" · 소아 {query.get('child')}명"
+        if int(query.get("infant", 0) or 0):
+            passengers += f" · 유아 {query.get('infant')}명"
         common = [
             f"조건: {route_scope_label(query.get('scope') or query.get('route_scope'))}",
-            f"성인 {query.get('adults', 1)}명",
+            passengers,
             cabin_label(query.get("cabin", "ECONOMY")),
         ]
         lines.append(" · ".join(common))
+        extras = []
+        if query.get("filter_summary"):
+            extras.append(f"필터: {query['filter_summary']}")
+        if query.get("time_preference"):
+            extras.append(f"시간: {query['time_preference']}")
+        if query.get("force_refresh"):
+            extras.append("강제재조회")
+        if extras:
+            lines.append(" · ".join(extras))
     if payload.get("strategy_metadata"):
         meta = payload["strategy_metadata"]
         lines.append(

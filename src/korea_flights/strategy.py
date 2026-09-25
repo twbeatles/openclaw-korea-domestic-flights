@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, Protocol
 
+from .airlines import apply_airline_filters
 from .airports import airport_label, normalize_airport, resolve_route_scope, unique_codes
 from .dates import build_dates, compact_date, parse_date_range_text, parse_flexible_date, pretty_date, verify_date_order, verify_return_offset
 from .diagnostics import build_refine_diagnostics, choose_fallback_plan
@@ -22,6 +23,81 @@ class StrategyLimits:
     fallback_budget: int = 6
 
 
+@dataclass
+class SearchFilters:
+    """Option-level filters ported from the source repo GUI filter panel.
+
+    - airline: all | LCC | FSC (항공사 분류 필터)
+    - nonstop_only: 직항만
+    - max_stops: 허용 최대 경유 횟수
+    - min_price/max_price: 실질가(혜택가 적용) 예산 범위
+    """
+
+    airline: str | None = None
+    nonstop_only: bool = False
+    max_stops: int | None = None
+    min_price: int | None = None
+    max_price: int | None = None
+
+    def active(self) -> bool:
+        return bool(
+            (self.airline and self.airline.upper() != "ALL")
+            or self.nonstop_only
+            or self.max_stops is not None
+            or self.min_price is not None
+            or self.max_price is not None
+        )
+
+    def describe(self) -> str | None:
+        parts: list[str] = []
+        if self.airline and self.airline.upper() != "ALL":
+            parts.append(f"항공사 {self.airline.upper()}")
+        if self.nonstop_only:
+            parts.append("직항만")
+        if self.max_stops is not None:
+            parts.append(f"최대 경유 {self.max_stops}회")
+        if self.min_price is not None or self.max_price is not None:
+            low = f"{self.min_price:,}원" if self.min_price is not None else "0원"
+            high = f"{self.max_price:,}원" if self.max_price is not None else "제한 없음"
+            parts.append(f"가격 {low}~{high}")
+        return " · ".join(parts) if parts else None
+
+    def to_dict(self) -> dict:
+        return {
+            "airline": self.airline,
+            "nonstop_only": self.nonstop_only,
+            "max_stops": self.max_stops,
+            "min_price": self.min_price,
+            "max_price": self.max_price,
+        }
+
+
+def build_search_filters(
+    *,
+    airline: str | None = None,
+    nonstop_only: bool = False,
+    max_stops: int | None = None,
+    min_price: int | None = None,
+    max_price: int | None = None,
+) -> SearchFilters:
+    # Eager validation so bad CLI values fail fast even on empty results.
+    apply_airline_filters(
+        [],
+        airline=airline,
+        nonstop_only=nonstop_only,
+        max_stops=max_stops,
+        min_price=min_price,
+        max_price=max_price,
+    )
+    return SearchFilters(
+        airline=airline,
+        nonstop_only=nonstop_only,
+        max_stops=max_stops,
+        min_price=min_price,
+        max_price=max_price,
+    )
+
+
 class FlightSource(Protocol):
     """Structural interface for search backends (real adapter and test doubles)."""
 
@@ -33,9 +109,12 @@ class FlightSource(Protocol):
         departure_date: str,
         return_date: str | None = ...,
         adults: int = ...,
+        child: int = ...,
+        infant: int = ...,
         cabin_class: str = ...,
         max_results: int = ...,
         background_mode: bool = ...,
+        force_refresh: bool = ...,
         progress_callback: Any = ...,
     ) -> Any: ...
     def broad_date_range(
@@ -46,6 +125,8 @@ class FlightSource(Protocol):
         dates: Any,
         return_offset: int = ...,
         adults: int = ...,
+        child: int = ...,
+        infant: int = ...,
         cabin_class: str = ...,
         progress_callback: Any = ...,
     ) -> Any: ...
@@ -67,6 +148,28 @@ class HybridStrategyEngine:
         self.limits = limits or StrategyLimits()
         self.source = source_adapter or FlightSourceAdapter(repo_path=repo_path)
 
+    def _search_call(self, **kwargs) -> Any:
+        try:
+            return self.source.search(**kwargs)
+        except TypeError as exc:
+            message = str(exc)
+            if any(key in message for key in ("child", "infant", "force_refresh")):
+                for key in ("child", "infant", "force_refresh"):
+                    kwargs.pop(key, None)
+                return self.source.search(**kwargs)
+            raise
+
+    def _broad_call(self, **kwargs) -> Any:
+        try:
+            return self.source.broad_date_range(**kwargs)
+        except TypeError as exc:
+            message = str(exc)
+            if any(key in message for key in ("child", "infant")):
+                for key in ("child", "infant"):
+                    kwargs.pop(key, None)
+                return self.source.broad_date_range(**kwargs)
+            raise
+
     def search_single(
         self,
         *,
@@ -76,8 +179,16 @@ class HybridStrategyEngine:
         return_date: str | None = None,
         scope: str = "auto",
         adults: int = 1,
+        child: int = 0,
+        infant: int = 0,
         cabin: str = "ECONOMY",
         max_results: int = 20,
+        force_refresh: bool = False,
+        airline: str | None = None,
+        nonstop_only: bool = False,
+        max_stops: int | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
         time_pref: str | None = None,
         depart_after: str | None = None,
         return_after: str | None = None,
@@ -90,6 +201,13 @@ class HybridStrategyEngine:
         departure_date = pretty_date(parse_flexible_date(departure))
         parsed_return = pretty_date(parse_flexible_date(return_date)) if return_date else None
         verify_date_order(departure_date, parsed_return)
+        filters = build_search_filters(
+            airline=airline,
+            nonstop_only=nonstop_only,
+            max_stops=max_stops,
+            min_price=min_price,
+            max_price=max_price,
+        )
         pref = build_time_preference(
             time_pref=time_pref,
             depart_after=depart_after,
@@ -98,19 +216,30 @@ class HybridStrategyEngine:
             prefer=prefer,
         )
         logs: list[str] = []
-        results = self.source.search(
+        results = self._search_call(
             origin=origin_code,
             destination=destination_code,
             departure_date=departure_date,
             return_date=parsed_return,
             adults=adults,
+            child=child,
+            infant=infant,
             cabin_class=cabin,
             max_results=max_results,
             background_mode=False,
+            force_refresh=force_refresh,
             progress_callback=lambda msg: logs.append(str(msg)),
         )
         normalized = [normalize_result_payload(item) for item in results]
-        filtered, ranked_by_pref = filter_and_rank_by_time_preference(normalized, pref)
+        airline_rows = apply_airline_filters(
+            normalized,
+            airline=filters.airline,
+            nonstop_only=filters.nonstop_only,
+            max_stops=filters.max_stops,
+            min_price=filters.min_price,
+            max_price=filters.max_price,
+        )
+        filtered, ranked_by_pref = filter_and_rank_by_time_preference(airline_rows, pref)
         ranked = ranked_by_pref if pref.active() and ranked_by_pref else filtered
         query = {
             "origin": origin_code,
@@ -120,7 +249,12 @@ class HybridStrategyEngine:
             "scope": scope,
             "route_scope": route_scope,
             "adults": adults,
+            "child": child,
+            "infant": infant,
             "cabin": cabin,
+            "force_refresh": force_refresh,
+            "filters": filters.to_dict(),
+            "filter_summary": filters.describe(),
             "time_preference": pref.describe(),
         }
         summary = build_single_summary(query, ranked, route_scope)
@@ -130,10 +264,12 @@ class HybridStrategyEngine:
             "summary": summary,
             "results": ranked,
             "strategy_metadata": {
-                "pipeline": ["direct_search", "time_filter", "final_ranking"],
+                "pipeline": ["direct_search", "airline_filter", "time_filter", "final_ranking"],
                 "broad_count": 0,
                 "refined_count": len(normalized),
                 "fallback_count": 0,
+                "filter_active": filters.active(),
+                "filtered_out_count": len(normalized) - len(airline_rows),
                 "verified_results_required": pref.active(),
                 "verified_result_count": len(ranked),
             },
@@ -152,7 +288,15 @@ class HybridStrategyEngine:
         return_offset: int = 0,
         scope: str = "auto",
         adults: int = 1,
+        child: int = 0,
+        infant: int = 0,
         cabin: str = "ECONOMY",
+        force_refresh: bool = False,
+        airline: str | None = None,
+        nonstop_only: bool = False,
+        max_stops: int | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
         time_pref: str | None = None,
         depart_after: str | None = None,
         return_after: str | None = None,
@@ -167,6 +311,13 @@ class HybridStrategyEngine:
         verify_return_offset(return_offset)
         if len(dates) > self.limits.max_days:
             raise ValueError(f"date range must be {self.limits.max_days} days or less")
+        filters = build_search_filters(
+            airline=airline,
+            nonstop_only=nonstop_only,
+            max_stops=max_stops,
+            min_price=min_price,
+            max_price=max_price,
+        )
         pref = build_time_preference(
             time_pref=time_pref,
             depart_after=depart_after,
@@ -175,14 +326,30 @@ class HybridStrategyEngine:
             prefer=prefer,
         )
         logs: list[str] = []
-        broad_rows = self._broad_rows_for_destination(origin_code, destination_code, dates, return_offset, adults, cabin, logs)
+        broad_rows = self._broad_rows_for_destination(
+            origin_code, destination_code, dates, return_offset, adults, child, infant, cabin, logs
+        )
         scored = self.score_candidates(broad_rows, dates=dates, destinations=[destination_code], time_pref=pref)
         self._apply_candidate_scores(broad_rows, scored, key_fields=("departure_date",))
-        detailed_map, diagnostics, fallback_rows = self._refine_rows(origin_code, scored, pref, adults, cabin, logs, key_fields=("departure_date",))
+        detailed_map, diagnostics, fallback_rows = self._refine_rows(
+            origin_code, scored, pref, filters, adults, child, infant, cabin, force_refresh, logs,
+            key_fields=("departure_date",),
+        )
         final_rows = [detailed_map.get((row["departure_date"],), row) for row in broad_rows]
+        if filters.active():
+            final_rows = apply_airline_filters(
+                final_rows,
+                airline=filters.airline,
+                nonstop_only=filters.nonstop_only,
+                max_stops=filters.max_stops,
+                min_price=filters.min_price,
+                max_price=filters.max_price,
+            )
         ranked = verified_priced_rows(final_rows, time_pref_active=pref.active())
         unverified = unverified_broad_rows(final_rows) if pref.active() else []
         metadata = self._strategy_metadata(broad_rows, detailed_map, fallback_rows, ranked, unverified, diagnostics, pref)
+        metadata["filters"] = filters.to_dict()
+        metadata["filter_active"] = filters.active()
         query = {
             "origin": origin_code,
             "destination": destination_code,
@@ -192,7 +359,12 @@ class HybridStrategyEngine:
             "scope": scope,
             "route_scope": route_scope,
             "adults": adults,
+            "child": child,
+            "infant": infant,
             "cabin": cabin,
+            "force_refresh": force_refresh,
+            "filters": filters.to_dict(),
+            "filter_summary": filters.describe(),
             "time_preference": pref.describe(),
         }
         summary = build_range_summary(query, final_rows, ranked, metadata, diagnostics)
@@ -219,7 +391,15 @@ class HybridStrategyEngine:
         return_offset: int = 0,
         scope: str = "auto",
         adults: int = 1,
+        child: int = 0,
+        infant: int = 0,
         cabin: str = "ECONOMY",
+        force_refresh: bool = False,
+        airline: str | None = None,
+        nonstop_only: bool = False,
+        max_stops: int | None = None,
+        min_price: int | None = None,
+        max_price: int | None = None,
         time_pref: str | None = None,
         depart_after: str | None = None,
         return_after: str | None = None,
@@ -241,6 +421,13 @@ class HybridStrategyEngine:
         combos = len(dates) * len(destination_codes)
         if combos > self.limits.max_combos:
             raise ValueError(f"검색 조합 수는 {self.limits.max_combos}개 이하로 제한됩니다.")
+        filters = build_search_filters(
+            airline=airline,
+            nonstop_only=nonstop_only,
+            max_stops=max_stops,
+            min_price=min_price,
+            max_price=max_price,
+        )
         pref = build_time_preference(
             time_pref=time_pref,
             depart_after=depart_after,
@@ -251,16 +438,32 @@ class HybridStrategyEngine:
         logs: list[str] = []
         broad_rows: list[dict] = []
         for destination_code in destination_codes:
-            broad_rows.extend(self._broad_rows_for_destination(origin_code, destination_code, dates, return_offset, adults, cabin, logs))
+            broad_rows.extend(
+                self._broad_rows_for_destination(
+                    origin_code, destination_code, dates, return_offset, adults, child, infant, cabin, logs
+                )
+            )
         scored = self.score_candidates(broad_rows, dates=dates, destinations=destination_codes, time_pref=pref)
         self._apply_candidate_scores(broad_rows, scored, key_fields=("destination", "departure_date"))
         detailed_map, diagnostics, fallback_rows = self._refine_rows(
-            origin_code, scored, pref, adults, cabin, logs, key_fields=("destination", "departure_date")
+            origin_code, scored, pref, filters, adults, child, infant, cabin, force_refresh, logs,
+            key_fields=("destination", "departure_date"),
         )
         final_rows = [detailed_map.get((row["destination"], row["departure_date"]), row) for row in broad_rows]
+        if filters.active():
+            final_rows = apply_airline_filters(
+                final_rows,
+                airline=filters.airline,
+                nonstop_only=filters.nonstop_only,
+                max_stops=filters.max_stops,
+                min_price=filters.min_price,
+                max_price=filters.max_price,
+            )
         ranked = verified_priced_rows(final_rows, time_pref_active=pref.active())
         unverified = unverified_broad_rows(final_rows) if pref.active() else []
         metadata = self._strategy_metadata(broad_rows, detailed_map, fallback_rows, ranked, unverified, diagnostics, pref)
+        metadata["filters"] = filters.to_dict()
+        metadata["filter_active"] = filters.active()
         query = {
             "origin": origin_code,
             "destinations": destination_codes,
@@ -270,7 +473,12 @@ class HybridStrategyEngine:
             "scope": scope,
             "route_scope": route_scope,
             "adults": adults,
+            "child": child,
+            "infant": infant,
             "cabin": cabin,
+            "force_refresh": force_refresh,
+            "filters": filters.to_dict(),
+            "filter_summary": filters.describe(),
             "time_preference": pref.describe(),
         }
         summary = build_matrix_summary(query, final_rows, ranked, metadata, diagnostics)
@@ -353,15 +561,19 @@ class HybridStrategyEngine:
         dates: list[Any],
         return_offset: int,
         adults: int,
+        child: int,
+        infant: int,
         cabin: str,
         logs: list[str],
     ) -> list[dict]:
-        raw = self.source.broad_date_range(
+        raw = self._broad_call(
             origin=origin,
             destination=destination,
             dates=[compact_date(date) for date in dates],
             return_offset=return_offset,
             adults=adults,
+            child=child,
+            infant=infant,
             cabin_class=cabin,
             progress_callback=lambda msg: logs.append(str(msg)),
         )
@@ -388,8 +600,12 @@ class HybridStrategyEngine:
         origin: str,
         scored_rows: list[dict],
         time_pref: TimePreference,
+        filters: SearchFilters,
         adults: int,
+        child: int,
+        infant: int,
         cabin: str,
+        force_refresh: bool,
         logs: list[str],
         *,
         key_fields: tuple[str, ...],
@@ -398,7 +614,9 @@ class HybridStrategyEngine:
         detailed: dict[tuple, dict] = {}
         for row in selected:
             key = tuple(row[field] for field in key_fields)
-            detailed[key] = self._refine_one(origin, row, time_pref, adults, cabin, logs, stage="refine")
+            detailed[key] = self._refine_one(
+                origin, row, time_pref, filters, adults, child, infant, cabin, force_refresh, logs, stage="refine"
+            )
         diagnostics = build_refine_diagnostics(
             scored_rows,
             detailed.values(),
@@ -423,7 +641,9 @@ class HybridStrategyEngine:
                     break
             for row in fallback_rows:
                 key = tuple(row[field] for field in key_fields)
-                detailed[key] = self._refine_one(origin, row, time_pref, adults, cabin, logs, stage="fallback")
+                detailed[key] = self._refine_one(
+                    origin, row, time_pref, filters, adults, child, infant, cabin, force_refresh, logs, stage="fallback"
+                )
             diagnostics = build_refine_diagnostics(
                 scored_rows,
                 detailed.values(),
@@ -434,30 +654,71 @@ class HybridStrategyEngine:
         diagnostics["fallback_refined_count"] = len(fallback_rows)
         return detailed, diagnostics, fallback_rows
 
-    def _refine_one(self, origin: str, row: dict, time_pref: TimePreference, adults: int, cabin: str, logs: list[str], *, stage: str) -> dict:
+    def _refine_one(
+        self,
+        origin: str,
+        row: dict,
+        time_pref: TimePreference,
+        filters: SearchFilters,
+        adults: int,
+        child: int,
+        infant: int,
+        cabin: str,
+        force_refresh: bool,
+        logs: list[str],
+        *,
+        stage: str,
+    ) -> dict:
         destination = str(row.get("destination") or "")
-        results = self.source.search(
+        results = self._search_call(
             origin=origin,
             destination=destination,
             departure_date=row["departure_date"],
             return_date=row.get("return_date"),
             adults=adults,
+            child=child,
+            infant=infant,
             cabin_class=cabin,
             max_results=20,
             background_mode=False,
+            force_refresh=force_refresh,
             progress_callback=lambda msg: logs.append(f"[{stage} {destination} {row['departure_date']}] {msg}"),
         )
         raw_results = [normalize_result_payload(item) for item in results]
-        filtered, ranked = filter_and_rank_by_time_preference(raw_results, time_pref)
-        candidate_pool = ranked if time_pref.active() else priced_rows(raw_results)
-        cheapest = candidate_pool[0] if candidate_pool else None
-        payload = normalize_result_payload(cheapest)
-        reason, detail = self._diagnose_refine_failure(
+        airline_rows = apply_airline_filters(
             raw_results,
-            filtered if time_pref.active() else candidate_pool,
-            int(row.get("price", 0) or 0),
-            bool(row.get("return_date") and (time_pref.return_min is not None or time_pref.return_max is not None)),
+            airline=filters.airline,
+            nonstop_only=filters.nonstop_only,
+            max_stops=filters.max_stops,
+            min_price=filters.min_price,
+            max_price=filters.max_price,
         )
+        if filters.active() and raw_results and not airline_rows:
+            reason = "airline_filter_no_match"
+            detail = {
+                "raw_option_count": len(raw_results),
+                "priced_option_count": sum(1 for item in raw_results if int(item.get("price", 0) or 0) > 0),
+                "departure_time_count": sum(1 for item in raw_results if str(item.get("departure_time") or "").strip()),
+                "return_time_count": sum(1 for item in raw_results if str(item.get("return_departure_time") or "").strip()),
+                "has_return_time_constraint": bool(
+                    row.get("return_date") and (time_pref.return_min is not None or time_pref.return_max is not None)
+                ),
+                "hint": "항공사/경유/가격 조건 미충족",
+            }
+            cheapest = None
+            filtered: list[dict] = []
+            candidate_pool: list[dict] = []
+        else:
+            filtered, ranked = filter_and_rank_by_time_preference(airline_rows, time_pref)
+            candidate_pool = ranked if time_pref.active() else priced_rows(airline_rows)
+            cheapest = candidate_pool[0] if candidate_pool else None
+            reason, detail = self._diagnose_refine_failure(
+                airline_rows,
+                filtered if time_pref.active() else candidate_pool,
+                int(row.get("price", 0) or 0),
+                bool(row.get("return_date") and (time_pref.return_min is not None or time_pref.return_max is not None)),
+            )
+        payload = normalize_result_payload(cheapest)
         payload.update(
             {
                 "destination": destination,
@@ -471,7 +732,7 @@ class HybridStrategyEngine:
                 "departure_time_count": detail.get("departure_time_count", 0),
                 "return_time_count": detail.get("return_time_count", 0),
                 "has_return_time_constraint": detail.get("has_return_time_constraint", False),
-                "time_pref_valid_count": len(filtered if time_pref.active() else candidate_pool),
+                "time_pref_valid_count": len(filtered if time_pref.active() else (candidate_pool if cheapest is not None else [])),
                 "broad_price": row.get("price", 0),
                 "diagnostic_reason": reason,
                 "diagnostic_detail": detail,

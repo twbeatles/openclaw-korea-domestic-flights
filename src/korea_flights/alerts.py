@@ -5,15 +5,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from .airlines import VALID_AIRLINE_FILTERS
 from .airports import airport_label, infer_routes_scope, normalize_airport, resolve_route_scope, unique_codes
 from .dates import parse_date_range_text, parse_flexible_date, pretty_date, seoul_now, verify_date_order, verify_return_offset
 from .formatting import cabin_label
 from .results import format_price
 from .source import resolve_source_repo
-from .strategy import HybridStrategyEngine, StrategyLimits
+from .strategy import HybridStrategyEngine, StrategyLimits, build_search_filters
 from .timeprefs import describe_time_preference_payload
 
-STORE_VERSION = 4
+STORE_VERSION = 5
 KST_LABEL = "Asia/Seoul"
 DEFAULT_STORE = Path("price-alert-rules.json")
 DEFAULT_MESSAGE_TEMPLATE = """[항공권 가격 알림] {label}
@@ -21,7 +22,7 @@ DEFAULT_MESSAGE_TEMPLATE = """[항공권 가격 알림] {label}
 - 조건: 성인 {adults}명 · {cabin_label}
 - 목표가: {target_price}
 - 확인된 최저가: {observed_price}
-- 일정: {date_text}{best_destination_line}{airline_line}{time_line}
+- 일정: {date_text}{best_destination_line}{airline_line}{time_line}{filter_line}
 - 상태: {status_line}"""
 
 
@@ -36,6 +37,20 @@ def _infer_query_scope(query: dict[str, Any]) -> str:
     if not origin or not normalized_destinations:
         return "auto"
     return infer_routes_scope(origin, normalized_destinations)
+
+
+def _normalize_stored_filters(raw: Any) -> dict[str, Any]:
+    payload = dict(raw) if isinstance(raw, dict) else {}
+    airline = payload.get("airline")
+    if airline is not None and str(airline).upper() not in VALID_AIRLINE_FILTERS:
+        airline = None
+    return {
+        "airline": airline,
+        "nonstop_only": bool(payload.get("nonstop_only", False)),
+        "max_stops": payload.get("max_stops"),
+        "min_price": payload.get("min_price"),
+        "max_price": payload.get("max_price"),
+    }
 
 
 def _migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
@@ -61,6 +76,9 @@ def _migrate_rule(rule: dict[str, Any]) -> dict[str, Any]:
     query["destination"] = query["destinations"][0] if len(query["destinations"]) == 1 else query.get("destination")
     query["scope"] = str(query.get("scope") or _infer_query_scope(query))
     query.setdefault("time_preference", {})
+    query.setdefault("child", 0)
+    query.setdefault("infant", 0)
+    query["filters"] = _normalize_stored_filters(query.get("filters"))
     return migrated
 
 
@@ -125,6 +143,18 @@ def make_rule(args) -> dict[str, Any]:
             verify_return_offset(return_offset)
             date_range = None
 
+    child = int(getattr(args, "child", 0) or 0)
+    infant = int(getattr(args, "infant", 0) or 0)
+    filters = {
+        "airline": getattr(args, "airline", None),
+        "nonstop_only": bool(getattr(args, "nonstop_only", False)),
+        "max_stops": getattr(args, "max_stops", None),
+        "min_price": getattr(args, "min_price", None),
+        "max_price": getattr(args, "max_price", None),
+    }
+    # Fail fast on invalid filter values at rule creation time.
+    build_search_filters(**filters)
+
     trip_type = "round_trip" if return_date or return_offset > 0 else "one_way"
     date_label = f"{date_range['start_date']}~{date_range['end_date']}" if date_range else departure
     destination_label = airport_label(destinations[0]) if len(destinations) == 1 else ", ".join(airport_label(code) for code in destinations)
@@ -143,10 +173,13 @@ def make_rule(args) -> dict[str, Any]:
         "date_range": date_range,
         "return_offset": return_offset,
         "adults": args.adults,
+        "child": child,
+        "infant": infant,
         "cabin": args.cabin,
         "scope": args.scope if getattr(args, "scope", "auto") != "auto" else route_scope,
         "trip_type": trip_type,
         "target_price_krw": args.target_price,
+        "filters": filters,
         "time_preference": time_preference,
     }
     return {
@@ -163,9 +196,12 @@ def make_rule(args) -> dict[str, Any]:
             "date_range": date_range,
             "return_offset": return_offset,
             "adults": args.adults,
+            "child": child,
+            "infant": infant,
             "cabin": args.cabin,
             "scope": args.scope if getattr(args, "scope", "auto") != "auto" else route_scope,
             "trip_type": trip_type,
+            "filters": filters,
             "time_preference": time_preference,
             "source_repo_path": stored_source_repo,
         },
@@ -183,6 +219,11 @@ def make_rule(args) -> dict[str, Any]:
     }
 
 
+def describe_filter_payload(filters: dict[str, Any] | None) -> str | None:
+    payload = _normalize_stored_filters(filters)
+    return build_search_filters(**payload).describe()
+
+
 def describe_rule(rule: dict[str, Any]) -> str:
     q = rule["query"]
     destinations = q.get("destinations") or ([q["destination"]] if q.get("destination") else [])
@@ -196,12 +237,19 @@ def describe_rule(rule: dict[str, Any]) -> str:
             date_text += f" ~ {q['return_date']}"
     time_pref_text = describe_time_preference_payload(q.get("time_preference") or {})
     time_line = f"\n- 시간 조건: {time_pref_text}" if time_pref_text else ""
+    passengers = f"성인 {q['adults']}명"
+    if int(q.get("child", 0) or 0):
+        passengers += f" · 소아 {q['child']}명"
+    if int(q.get("infant", 0) or 0):
+        passengers += f" · 유아 {q['infant']}명"
+    filter_text = describe_filter_payload(q.get("filters"))
+    filter_line = f"\n- 필터: {filter_text}" if filter_text else ""
     return (
         f"[{'ON' if rule.get('enabled', True) else 'OFF'}] {rule['id']} | {rule['label']}\n"
         f"- 노선: {airport_label(q['origin'])} -> {', '.join(airport_label(code) for code in destinations)}\n"
         f"- scope: {q.get('scope') or _infer_query_scope(q)}\n"
         f"- 일정: {date_text}\n"
-        f"- 조건: 성인 {q['adults']}명 · {cabin_label(q['cabin'])} · 목표가 {format_price(rule['target_price_krw'])}{time_line}"
+        f"- 조건: {passengers} · {cabin_label(q['cabin'])} · 목표가 {format_price(rule['target_price_krw'])}{filter_line}{time_line}"
     )
 
 
@@ -211,11 +259,19 @@ def check_rule(rule: dict[str, Any], *, repo_path: str | None = None, limits: St
     effective_repo_path = repo_path or q.get("source_repo_path")
     engine = HybridStrategyEngine(repo_path=effective_repo_path, limits=limits)
     tp = q.get("time_preference") or {}
+    stored_filters = _normalize_stored_filters(q.get("filters"))
     common = {
         "origin": q["origin"],
         "scope": q.get("scope", "auto"),
         "adults": q["adults"],
+        "child": int(q.get("child", 0) or 0),
+        "infant": int(q.get("infant", 0) or 0),
         "cabin": q["cabin"],
+        "airline": stored_filters["airline"],
+        "nonstop_only": stored_filters["nonstop_only"],
+        "max_stops": stored_filters["max_stops"],
+        "min_price": stored_filters["min_price"],
+        "max_price": stored_filters["max_price"],
         "time_pref": tp.get("time_pref"),
         "depart_after": tp.get("depart_after"),
         "return_after": tp.get("return_after"),
@@ -282,6 +338,7 @@ def build_notification_context(rule: dict[str, Any], result: dict[str, Any]) -> 
         time_bits.append(f"\n- 가는편 시간: {best.get('departure_time')}")
     if best.get("return_departure_time"):
         time_bits.append(f"\n- 오는편 시간: {best.get('return_departure_time')}")
+    filter_text = describe_filter_payload(q.get("filters"))
     return {
         "rule_id": rule["id"],
         "label": rule["label"],
@@ -305,6 +362,7 @@ def build_notification_context(rule: dict[str, Any], result: dict[str, Any]) -> 
             else (f"\n- 항공사: {airline}" if airline else "")
         ),
         "time_line": "".join(time_bits),
+        "filter_line": f"\n- 필터: {filter_text}" if filter_text else "",
         "status_line": f"목표가 충족 ({target - observed:,}원 여유)" if target >= observed else f"목표가 초과 ({observed - target:,}원 초과)",
     }
 

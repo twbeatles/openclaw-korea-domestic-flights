@@ -107,6 +107,15 @@ def doctor(repo_path: str | Path | None = None, *, import_check: bool = False) -
     return health
 
 
+def _validate_passengers(adults: int, child: int, infant: int) -> None:
+    if not 1 <= int(adults) <= 9:
+        raise ValueError("--adults 는 1~9 사이여야 합니다.")
+    if not 0 <= int(child) <= 9:
+        raise ValueError("--child 는 0~9 사이여야 합니다.")
+    if not 0 <= int(infant) <= 9:
+        raise ValueError("--infant 는 0~9 사이여야 합니다.")
+
+
 class FlightSourceAdapter:
     """Adapter around the external Scraping-flight-information runtime."""
 
@@ -135,25 +144,32 @@ class FlightSourceAdapter:
         departure_date: str,
         return_date: str | None = None,
         adults: int = 1,
+        child: int = 0,
+        infant: int = 0,
         cabin_class: str = "ECONOMY",
         max_results: int = 1000,
         background_mode: bool = False,
+        force_refresh: bool = False,
         progress_callback: Callable[[str], None] | None = None,
     ) -> list:
+        _validate_passengers(adults, child, infant)
         FlightSearcher, _ = self.import_searchers()
         searcher = FlightSearcher()
         try:
-            return searcher.search(
-                origin=origin,
-                destination=destination,
-                departure_date=departure_date,
-                return_date=return_date,
-                adults=adults,
-                cabin_class=cabin_class,
-                max_results=max_results,
-                progress_callback=progress_callback,
-                background_mode=background_mode,
-            )
+            kwargs: dict = {
+                "origin": origin,
+                "destination": destination,
+                "departure_date": departure_date,
+                "return_date": return_date,
+                "adults": adults,
+                "cabin_class": cabin_class,
+                "max_results": max_results,
+                "progress_callback": progress_callback,
+                "background_mode": background_mode,
+            }
+            # child/infant/force_refresh mirror upstream FlightSearcher.search.
+            kwargs.update({"child": child, "infant": infant, "force_refresh": force_refresh})
+            return searcher.search(**kwargs)
         finally:
             close_fn = getattr(searcher, "close", None)
             if callable(close_fn):
@@ -167,21 +183,30 @@ class FlightSourceAdapter:
         dates: list[str],
         return_offset: int = 0,
         adults: int = 1,
+        child: int = 0,
+        infant: int = 0,
         cabin_class: str = "ECONOMY",
         progress_callback: Callable[[str], None] | None = None,
     ) -> dict[str, tuple[int, str]]:
+        _validate_passengers(adults, child, infant)
         _, ParallelSearcher = self.import_searchers()
         searcher = ParallelSearcher()
         try:
-            return searcher.search_date_range(
-                origin=origin,
-                destination=destination,
-                dates=dates,
-                return_offset=return_offset,
-                adults=adults,
-                cabin_class=cabin_class,
-                progress_callback=progress_callback,
-            )
+            kwargs: dict = {
+                "origin": origin,
+                "destination": destination,
+                "dates": dates,
+                "return_offset": return_offset,
+                "adults": adults,
+                "cabin_class": cabin_class,
+                "progress_callback": progress_callback,
+            }
+            try:
+                return searcher.search_date_range(
+                    **kwargs, child=child, infant=infant
+                )
+            except TypeError:
+                return searcher.search_date_range(**kwargs)
         finally:
             close_fn = getattr(searcher, "close", None)
             if callable(close_fn):
