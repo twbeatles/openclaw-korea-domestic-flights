@@ -254,7 +254,7 @@ def route_scope_label(scope: str) -> str:
 
 
 def normalize_result_payload(item) -> dict:
-    if is_dataclass(item):
+    if is_dataclass(item) and not isinstance(item, type):
         data = asdict(item)
     elif hasattr(item, "__dict__"):
         data = dict(item.__dict__)

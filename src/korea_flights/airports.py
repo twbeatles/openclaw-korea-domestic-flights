@@ -143,7 +143,7 @@ def normalize_airport(value: str) -> str:
     raise ValueError(f"지원하지 않는 공항 입력입니다: {value}")
 
 
-def airport_label(code: str) -> str:
+def airport_label(code: str | None) -> str:
     normalized = (code or "").upper()
     return f"{AIRPORT_NAMES.get(normalized, normalized)}({normalized})" if normalized else ""
 

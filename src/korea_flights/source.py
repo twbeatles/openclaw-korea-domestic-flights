@@ -121,8 +121,8 @@ class FlightSourceAdapter:
     def import_searchers(self):
         self._ensure_path()
         try:
-            from scraping.parallel import ParallelSearcher
-            from scraping.searcher import FlightSearcher
+            from scraping.parallel import ParallelSearcher  # pyright: ignore[reportMissingImports]
+            from scraping.searcher import FlightSearcher  # pyright: ignore[reportMissingImports]
         except Exception as exc:
             raise SourceRepoError(f"Failed to import source searchers from {self.repo_path}: {exc}") from exc
         return FlightSearcher, ParallelSearcher

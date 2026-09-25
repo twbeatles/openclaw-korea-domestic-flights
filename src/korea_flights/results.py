@@ -31,7 +31,7 @@ RESULT_FIELD_DEFAULTS = {
 def normalize_result_payload(item) -> dict:
     if item is None:
         data = {}
-    elif is_dataclass(item):
+    elif is_dataclass(item) and not isinstance(item, type):
         data = asdict(item)
     elif hasattr(item, "__dict__"):
         data = dict(item.__dict__)

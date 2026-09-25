@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any
+from typing import Any, Protocol
 
 from .airports import airport_label, normalize_airport, resolve_route_scope, unique_codes
 from .dates import build_dates, compact_date, parse_date_range_text, parse_flexible_date, pretty_date, verify_date_order, verify_return_offset
@@ -22,6 +22,35 @@ class StrategyLimits:
     fallback_budget: int = 6
 
 
+class FlightSource(Protocol):
+    """Structural interface for search backends (real adapter and test doubles)."""
+
+    def search(
+        self,
+        *,
+        origin: str,
+        destination: str,
+        departure_date: str,
+        return_date: str | None = ...,
+        adults: int = ...,
+        cabin_class: str = ...,
+        max_results: int = ...,
+        background_mode: bool = ...,
+        progress_callback: Any = ...,
+    ) -> Any: ...
+    def broad_date_range(
+        self,
+        *,
+        origin: str,
+        destination: str,
+        dates: Any,
+        return_offset: int = ...,
+        adults: int = ...,
+        cabin_class: str = ...,
+        progress_callback: Any = ...,
+    ) -> Any: ...
+
+
 class HybridStrategyEngine:
     """Search strategy pipeline shared by single, range, and matrix commands."""
 
@@ -32,7 +61,7 @@ class HybridStrategyEngine:
         *,
         repo_path: str | None = None,
         limits: StrategyLimits | None = None,
-        source_adapter: FlightSourceAdapter | None = None,
+        source_adapter: FlightSource | None = None,
     ):
         self.repo_path = repo_path
         self.limits = limits or StrategyLimits()
@@ -406,7 +435,7 @@ class HybridStrategyEngine:
         return detailed, diagnostics, fallback_rows
 
     def _refine_one(self, origin: str, row: dict, time_pref: TimePreference, adults: int, cabin: str, logs: list[str], *, stage: str) -> dict:
-        destination = row.get("destination")
+        destination = str(row.get("destination") or "")
         results = self.source.search(
             origin=origin,
             destination=destination,
