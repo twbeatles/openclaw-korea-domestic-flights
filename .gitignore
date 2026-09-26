@@ -22,3 +22,4 @@ coverage.xml
 /regression-smoke-*/
 /repo-resolution-*/
 price-alert-rules.json
+.codegraph/
